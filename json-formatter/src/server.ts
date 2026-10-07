@@ -7,10 +7,17 @@ import fastifyRedis from "@fastify/redis";
 
 
 const app = fastify({logger: true});
+
+const redisurl = process.env.REDIS_URL;
+
+if (!redisurl) {
+    throw new Error ('Redis url not set')
+}
+
 app.register(health);
 app.register(format);
 app.register(fastifyRedis, {
-    url: process.env.REDIS_URL,
+    url: redisurl,
     connectTimeout: 5000
 })
 
