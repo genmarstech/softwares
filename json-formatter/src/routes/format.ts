@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 import { fixedData } from "../services/json.js";
+import { createHash } from "node:crypto";
 
 const format: FastifyPluginAsync = async (app) => {
   app.post<{ Body: string }>(
@@ -11,7 +12,9 @@ const format: FastifyPluginAsync = async (app) => {
     },
     async (req, reply) => {
       try {
-        const formatted = fixedData(req.body)
+        const cachedKey = `json:${createHash("sha256").update(req.body).digest("hex")}`
+        const formatted = await fixedData(app, req.body, cachedKey)
+        
         return reply.type("application/json").send(formatted)
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
