@@ -10,7 +10,8 @@ const app = fastify({logger: true});
 app.register(health);
 app.register(format);
 app.register(fastifyRedis, {
-    url: 'redis://127.0.0.1:6379'
+    url: process.env.REDIS_URL,
+    connectTimeout: 5000
 })
 
 
