@@ -6,9 +6,12 @@ so a reviewer scanning `views.py` for "what can a customer do" never has to
 mentally filter out the staff-only surface.
 """
 
-from rest_framework import mixins, permissions, viewsets
+from rest_framework import mixins, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
+
+from businesses.mixins import BusinessScopedMixin
+from businesses.permissions import IsBusinessStaff
 
 from .models import Order
 from .serializers import OrderSerializer, OrderSummarySerializer
@@ -16,18 +19,24 @@ from .services import OrderError
 from .services import transition as transition_order
 
 
-class OpsOrderViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
-    queryset = Order.objects.select_related("customer").prefetch_related("items", "status_history")
-    permission_classes = [permissions.IsAdminUser]
+class OpsOrderViewSet(BusinessScopedMixin, mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
+    permission_classes = [IsBusinessStaff]
     filterset_fields = ["status"]
     search_fields = ["reference", "customer__email", "contact_email", "contact_phone"]
     ordering_fields = ["created_at", "total"]
+
+    def get_queryset(self):
+        return (
+            Order.objects.filter(business=self.business)
+            .select_related("customer")
+            .prefetch_related("items", "status_history")
+        )
 
     def get_serializer_class(self):
         return OrderSerializer if self.action == "retrieve" else OrderSummarySerializer
 
     @action(detail=True, methods=["post"])
-    def transition(self, request, pk=None):
+    def transition(self, request, pk=None, business_slug=None):
         """
         The same `orders.services.transition()` the Django admin actions
         already call — one state machine, two front doors onto it.

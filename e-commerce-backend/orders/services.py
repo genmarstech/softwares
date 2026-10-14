@@ -86,7 +86,17 @@ def create_order_from_cart(
     delivery_line2: str = "",
     delivery_fee=0,
     contact_phone: str = "",
+    business=None,
 ) -> Order:
+    # `business` defaults to the cart's own — a cart is already resolved per
+    # business (cart/views.py), so the normal checkout path never needs to
+    # pass this explicitly. It exists as a parameter so a caller can still
+    # assert which business it expects, catching a mismatch here rather
+    # than silently trusting the cart.
+    if business is not None and business.pk != cart.business_id:
+        raise OrderError("business_mismatch", "This cart does not belong to that business.")
+    business = business or cart.business
+
     items = list(cart.items.select_related("product", "variant").order_by("product_id"))
     if not items:
         raise OrderError("empty_cart", "Your cart is empty.")
@@ -130,6 +140,7 @@ def create_order_from_cart(
 
     order = Order.objects.create(
         customer=user,
+        business=business,
         status=Order.Status.AWAITING_PAYMENT,
         subtotal=subtotal,
         delivery_fee=delivery_fee,

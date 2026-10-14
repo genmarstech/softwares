@@ -29,6 +29,7 @@ import logging
 import urllib.error
 import urllib.request
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
 from django.utils import timezone
@@ -177,3 +178,25 @@ def parse_callback(body: dict) -> dict:
         "receipt": values.get("MpesaReceiptNumber") or "",
         "phone": str(values.get("PhoneNumber") or ""),
     }
+
+
+def coerce_amount(raw) -> int | None:
+    """
+    Daraja's own `Amount` field, turned into whole shillings or None.
+
+    STK push only ever requests a whole-shilling amount (see
+    `InitiatePaymentView`'s `int(order.total.to_integral_value(...))`), so
+    anything Daraja could legitimately echo back is an integer already — a
+    value that isn't one, or isn't a number at all, is exactly as unusable as
+    a missing one and the caller treats it identically: never grounds to mark
+    a payment successful.
+    """
+    if raw is None:
+        return None
+    try:
+        value = Decimal(str(raw))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+    if value != value.to_integral_value():
+        return None
+    return int(value)

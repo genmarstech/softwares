@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.db import models
 
+from businesses.models import Business, default_business_id
 from catalog.models import Product, ProductVariant
 from core.models import StoreSettings, TimestampedModel
 
@@ -11,6 +12,12 @@ class InventoryRecord(TimestampedModel):
     `ProductVariant`s — never both for the same product line. `quantity` is
     only ever changed through `services.adjust_stock()`; nothing else writes
     to this field.
+
+    `business` is carried directly here rather than derived by joining
+    through `product`/`variant` every time — a record's owner is always one
+    of the two anyway, but a direct FK means every tenant-scoped query on
+    inventory is a single `.filter(business=...)`, not a two-branch OR
+    across `product__business` and `variant__product__business`.
     """
 
     product = models.OneToOneField(
@@ -18,6 +25,9 @@ class InventoryRecord(TimestampedModel):
     )
     variant = models.OneToOneField(
         ProductVariant, null=True, blank=True, on_delete=models.CASCADE, related_name="inventory_record"
+    )
+    business = models.ForeignKey(
+        Business, on_delete=models.PROTECT, related_name="inventory_records", default=default_business_id
     )
     quantity = models.PositiveIntegerField(default=0)
     low_stock_threshold = models.PositiveIntegerField(
@@ -42,7 +52,7 @@ class InventoryRecord(TimestampedModel):
     def effective_threshold(self) -> int:
         if self.low_stock_threshold is not None:
             return self.low_stock_threshold
-        return StoreSettings.load().low_stock_default_threshold
+        return StoreSettings.load(self.business).low_stock_default_threshold
 
     @property
     def is_low_stock(self) -> bool:

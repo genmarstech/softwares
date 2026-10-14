@@ -3,6 +3,7 @@ import secrets
 from django.conf import settings
 from django.db import models
 
+from businesses.models import Business, default_business_id
 from catalog.models import Product, ProductVariant
 from core.models import TimestampedModel
 
@@ -25,6 +26,9 @@ class Order(TimestampedModel):
 
     reference = models.CharField(max_length=20, unique=True, default=generate_reference, editable=False)
     customer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="orders")
+    business = models.ForeignKey(
+        Business, on_delete=models.PROTECT, related_name="orders", default=default_business_id
+    )
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.AWAITING_PAYMENT)
 
     currency = models.CharField(max_length=3, default="KES")
