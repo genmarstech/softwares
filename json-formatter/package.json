@@ -11,13 +11,13 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node dist/server.js",
     "dev": "tsx watch --env-file=.env src/server.ts"
-
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@fastify/cors": "^11.3.1",
     "@fastify/redis": "^9.0.0",
     "fastify": "^5.12.5",
     "jsonrepair": "^3.15.0"
