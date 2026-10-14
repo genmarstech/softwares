@@ -11,14 +11,35 @@ class TimestampedModel(models.Model):
         abstract = True
 
 
+def _default_business_id():
+    # Deferred import: `businesses.models` imports `TimestampedModel` from
+    # this module, so importing it back at module load time would be
+    # circular. See businesses/models.py::default_business_id for what this
+    # default is actually for (a Phase 1 → Phase 2 bridge) — this is the
+    # same thing, just import-safe from this side of the circle.
+    from businesses.models import default_business_id
+
+    return default_business_id()
+
+
 class StoreSettings(models.Model):
     """
-    Singleton row: currency and delivery defaults the rest of the store reads.
-
-    Enforced as a singleton by always loading/saving pk=1 (see `load()`) rather
-    than by a DB constraint — simplest thing that works for one row.
+    Currency and delivery defaults the rest of the store reads — one row per
+    business, `business` being the real uniqueness key now (Phase 2). The
+    `default=` bridge is still here deliberately: anything that calls
+    `StoreSettings(...)` directly without going through `load(business)`
+    (there shouldn't be any such call site left in application code after
+    this phase, but a stray one would otherwise hit a plain NOT NULL error
+    instead of a clear bug report) still resolves to the one business Phase
+    1 seeded rather than crashing outright.
     """
 
+    business = models.OneToOneField(
+        "businesses.Business",
+        on_delete=models.CASCADE,
+        related_name="store_settings",
+        default=_default_business_id,
+    )
     currency = models.CharField(max_length=3, default="KES")
     default_delivery_fee = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     low_stock_default_threshold = models.PositiveIntegerField(default=5)
@@ -30,11 +51,7 @@ class StoreSettings(models.Model):
     def __str__(self):
         return "Store settings"
 
-    def save(self, *args, **kwargs):
-        self.pk = 1
-        super().save(*args, **kwargs)
-
     @classmethod
-    def load(cls) -> "StoreSettings":
-        obj, _ = cls.objects.get_or_create(pk=1)
+    def load(cls, business) -> "StoreSettings":
+        obj, _ = cls.objects.get_or_create(business=business)
         return obj

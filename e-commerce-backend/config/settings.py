@@ -28,6 +28,11 @@ def env_list(name: str, default: str = "") -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+def env_int(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    return int(value) if value else default
+
+
 SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-dev-only-key")
 DEBUG = env_bool("DEBUG", False)
 ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", "localhost,127.0.0.1")
@@ -48,6 +53,7 @@ INSTALLED_APPS = [
     "django_filters",
     "drf_spectacular",
     "core",
+    "businesses",
     "accounts",
     "catalog",
     "inventory",
@@ -58,6 +64,11 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    # First, so every middleware and view after it — including anything
+    # that logs from inside CorsMiddleware or SecurityMiddleware — has a
+    # request id to tag its log lines with (core/logging.py's filter reads
+    # it). See core/request_id.py.
+    "core.request_id.RequestIDMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
@@ -131,6 +142,16 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STORAGES = {
+    # Explicit, not Django's implicit fallback — customizing STORAGES at
+    # all (for "staticfiles" below) stops Django from merging in its own
+    # default "default" entry, so leaving this key out doesn't fall back to
+    # FileSystemStorage, it breaks every model FileField/ImageField save
+    # with "Could not find config for 'default' in settings.STORAGES."
+    # That's exactly what was happening here — found by the first test that
+    # ever actually exercised ProductImage's save path end-to-end.
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
     "staticfiles": {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
     },
@@ -140,6 +161,13 @@ STORAGES = {
 # local dev serves them via Django's own static-files runserver helper.
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
+
+# Enforced in catalog/serializers.py::ProductImageSerializer.validate_image
+# — DRF's ImageField already confirms Pillow can open the file (a real
+# image, not just a renamed binary) before these run; these two catch the
+# "real image, but huge" case Pillow's own check doesn't.
+PRODUCT_IMAGE_MAX_BYTES = env_int("PRODUCT_IMAGE_MAX_BYTES", 5 * 1024 * 1024)  # 5MB
+PRODUCT_IMAGE_MAX_DIMENSION_PX = env_int("PRODUCT_IMAGE_MAX_DIMENSION_PX", 4000)
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -201,6 +229,15 @@ MPESA_TILL_NUMBER = os.environ.get("MPESA_TILL_NUMBER", "")
 MPESA_TRANSACTION_TYPE = os.environ.get("MPESA_TRANSACTION_TYPE", "CustomerBuyGoodsOnline")
 MPESA_CALLBACK_URL = os.environ.get("MPESA_CALLBACK_URL", "")
 
+# Daraja signs nothing — there is no header or body field that proves a
+# callback POST actually came from Safaricom. The mitigation this app can
+# actually implement is a pre-shared secret as the final path segment of
+# the URL registered with Daraja (MPESA_CALLBACK_URL above must end in it);
+# payments/views.py::MpesaCallbackView rejects anything that doesn't match,
+# and rejects everything if this is left blank — unconfigured means closed,
+# never open. Generate one with `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+MPESA_CALLBACK_SECRET = os.environ.get("MPESA_CALLBACK_SECRET", "")
+
 
 # Django REST Framework
 
@@ -224,10 +261,15 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.ScopedRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
-        # Only scoped views (auth, payment-initiate) opt in via throttle_scope;
-        # everything else is unthrottled at the DRF layer for the MVP.
+        # Only scoped views opt in via throttle_scope; everything else is
+        # still unthrottled at the DRF layer — an MVP-era decision, revisited
+        # in the staging-readiness review but not expanded further than
+        # these three, which are the endpoints that are either a credential-
+        # guessing surface (auth) or can move real stock/money (checkout,
+        # payment-initiate) repeatedly if hammered.
         "auth": "20/min",
         "payment-initiate": "10/min",
+        "checkout": "20/min",
     },
 }
 
@@ -270,8 +312,14 @@ if not DEBUG:
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
+    "filters": {
+        "request_id": {"()": "core.logging.RequestIDLogFilter"},
+    },
+    "formatters": {
+        "json": {"()": "core.logging.JSONFormatter"},
+    },
     "handlers": {
-        "console": {"class": "logging.StreamHandler"},
+        "console": {"class": "logging.StreamHandler", "filters": ["request_id"], "formatter": "json"},
     },
     "root": {
         "handlers": ["console"],

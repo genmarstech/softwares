@@ -5,11 +5,8 @@ from .models import StoreSettings
 
 @admin.register(StoreSettings)
 class StoreSettingsAdmin(admin.ModelAdmin):
-    list_display = ("currency", "default_delivery_fee", "low_stock_default_threshold")
-
-    def has_add_permission(self, request):
-        # Singleton — only the one row StoreSettings.load() creates.
-        return not StoreSettings.objects.exists()
-
-    def has_delete_permission(self, request, obj=None):
-        return False
+    # One row per business (the `business` OneToOneField is the uniqueness
+    # key) — no longer a platform-wide singleton as of Phase 2, so unlike
+    # before, a second row isn't a bug; it's a second business's settings.
+    list_display = ("business", "currency", "default_delivery_fee", "low_stock_default_threshold")
+    autocomplete_fields = ["business"]

@@ -1,6 +1,9 @@
-from rest_framework import permissions, viewsets
+from rest_framework import viewsets
+from rest_framework.exceptions import ValidationError
+from rest_framework.permissions import SAFE_METHODS
 
-from core.permissions import IsStaffOrReadOnly
+from businesses.mixins import BusinessScopedMixin
+from businesses.permissions import IsBusinessManager, IsBusinessManagerOrReadOnly, IsBusinessMember, caller_role
 
 from .filters import ProductFilter
 from .models import Category, Product, ProductImage, ProductVariant
@@ -12,35 +15,75 @@ from .serializers import (
 )
 
 
-class CategoryViewSet(viewsets.ModelViewSet):
-    queryset = Category.objects.all()
+class CategoryViewSet(BusinessScopedMixin, viewsets.ModelViewSet):
     serializer_class = CategorySerializer
-    permission_classes = [IsStaffOrReadOnly]
+    # Public read; managing the catalog is owner/manager, not staff — see
+    # businesses/permissions.py's module docstring for the role split.
+    permission_classes = [IsBusinessManagerOrReadOnly]
     search_fields = ["name"]
 
+    def get_queryset(self):
+        return Category.objects.filter(business=self.business)
 
-class ProductViewSet(viewsets.ModelViewSet):
+    def perform_create(self, serializer):
+        serializer.save(business=self.business)
+
+
+class ProductViewSet(BusinessScopedMixin, viewsets.ModelViewSet):
     serializer_class = ProductSerializer
-    permission_classes = [IsStaffOrReadOnly]
+    permission_classes = [IsBusinessManagerOrReadOnly]
     filterset_class = ProductFilter
     search_fields = ["name", "sku"]
     ordering_fields = ["price", "created_at"]
 
     def get_queryset(self):
-        qs = Product.objects.select_related("category").prefetch_related("images", "variants")
-        user = self.request.user
-        if user.is_authenticated and user.is_staff:
+        qs = Product.objects.filter(business=self.business).select_related("category").prefetch_related(
+            "images", "variants"
+        )
+        # A draft/archived product is visible to this business's own
+        # members, any role (staff included — "staff: read products") —
+        # scoped to membership in *this* business instead of the platform.
+        if caller_role(self.request, self) is not None:
             return qs
         return qs.filter(status=Product.Status.PUBLISHED)
 
+    def perform_create(self, serializer):
+        serializer.save(business=self.business)
 
-class ProductImageViewSet(viewsets.ModelViewSet):
-    queryset = ProductImage.objects.all()
+
+class ProductImageViewSet(BusinessScopedMixin, viewsets.ModelViewSet):
     serializer_class = ProductImageSerializer
-    permission_classes = [permissions.IsAdminUser]
+
+    def get_permissions(self):
+        # No public-read use case for this standalone management endpoint
+        # (a storefront visitor sees images via the parent product's own
+        # serialized data) — but staff can still look, same as the catalog
+        # generally; only owner/manager can attach or remove one.
+        permission_class = IsBusinessMember if self.request.method in SAFE_METHODS else IsBusinessManager
+        return [permission_class()]
+
+    def get_queryset(self):
+        return ProductImage.objects.filter(product__business=self.business)
+
+    def perform_create(self, serializer):
+        product = serializer.validated_data["product"]
+        if product.business_id != self.business.pk:
+            raise ValidationError({"product": "That product does not belong to this business."})
+        serializer.save()
 
 
-class ProductVariantViewSet(viewsets.ModelViewSet):
-    queryset = ProductVariant.objects.all()
+class ProductVariantViewSet(BusinessScopedMixin, viewsets.ModelViewSet):
     serializer_class = ProductVariantSerializer
-    permission_classes = [permissions.IsAdminUser]
+
+    def get_permissions(self):
+        permission_class = IsBusinessMember if self.request.method in SAFE_METHODS else IsBusinessManager
+        return [permission_class()]
+
+    def get_queryset(self):
+        return ProductVariant.objects.filter(product__business=self.business)
+
+    def perform_create(self, serializer):
+        product = serializer.validated_data["product"]
+        if product.business_id != self.business.pk:
+            raise ValidationError({"product": "That product does not belong to this business."})
+        serializer.save(business=product.business)

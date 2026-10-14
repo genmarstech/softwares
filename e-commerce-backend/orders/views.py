@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import Address
+from businesses.mixins import BusinessScopedMixin
 from cart.models import Cart
 from core.models import StoreSettings
 
@@ -18,10 +19,12 @@ from .services import OrderError, cancel_order, create_order_from_cart
 CUSTOMER_CANCELLABLE = {Order.Status.AWAITING_PAYMENT, Order.Status.PAYMENT_FAILED}
 
 
-class OrderViewSet(viewsets.ReadOnlyModelViewSet):
+class OrderViewSet(BusinessScopedMixin, viewsets.ReadOnlyModelViewSet):
     """
-    A customer only ever sees their own orders. Requesting someone else's
-    order id is a 404, never a 403 — a 403 would confirm the id exists.
+    A customer only ever sees their own orders, within this business.
+    Requesting someone else's order id — or this business's slug for an
+    order actually placed with a different business — is a 404, never a
+    403 — a 403 would confirm the id exists.
     """
 
     serializer_class = OrderSerializer
@@ -31,12 +34,12 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
         if getattr(self, "swagger_fake_view", False):
             return Order.objects.none()
         return (
-            Order.objects.filter(customer=self.request.user)
+            Order.objects.filter(customer=self.request.user, business=self.business)
             .prefetch_related("items", "status_history")
         )
 
     @action(detail=True, methods=["post"])
-    def cancel(self, request, pk=None):
+    def cancel(self, request, pk=None, business_slug=None):
         order = self.get_object()
         if order.status not in CUSTOMER_CANCELLABLE:
             return Response(
@@ -50,7 +53,7 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(OrderSerializer(order).data)
 
 
-class CheckoutView(APIView):
+class CheckoutView(BusinessScopedMixin, APIView):
     """
     Creates an order from the caller's current cart. All pricing/availability
     is re-validated server-side inside create_order_from_cart() — nothing
@@ -59,13 +62,14 @@ class CheckoutView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = CheckoutSerializer
+    throttle_scope = "checkout"
 
-    def post(self, request):
+    def post(self, request, business_slug=None):
         serializer = CheckoutSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        cart, _ = Cart.objects.get_or_create(user=request.user)
+        cart, _ = Cart.objects.get_or_create(user=request.user, business=self.business)
 
         if "address_id" in data:
             address = get_object_or_404(Address, pk=data["address_id"], user=request.user)
@@ -85,11 +89,12 @@ class CheckoutView(APIView):
                 "delivery_phone": data["delivery_phone"],
             }
 
-        store_settings = StoreSettings.load()
+        store_settings = StoreSettings.load(self.business)
         try:
             order = create_order_from_cart(
                 request.user,
                 cart,
+                business=self.business,
                 delivery_fee=store_settings.default_delivery_fee,
                 contact_phone=data.get("contact_phone", ""),
                 **delivery_fields,
