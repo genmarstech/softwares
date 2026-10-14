@@ -42,6 +42,22 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         return value
 
 
+class CustomerSerializer(serializers.ModelSerializer):
+    """Staff-facing read view of a customer — annotated fields come from
+    accounts/ops_views.py::OpsCustomerViewSet's queryset, not the model."""
+
+    order_count = serializers.IntegerField(read_only=True)
+    lifetime_total = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+
+    class Meta:
+        model = User
+        fields = [
+            "id", "email", "first_name", "last_name", "phone_number",
+            "is_active", "date_joined", "order_count", "lifetime_total",
+        ]
+        read_only_fields = fields
+
+
 class AddressSerializer(serializers.ModelSerializer):
     class Meta:
         model = Address

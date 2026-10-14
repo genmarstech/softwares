@@ -236,6 +236,15 @@ SPECTACULAR_SETTINGS = {
     "DESCRIPTION": "Minimal e-commerce backend MVP.",
     "VERSION": "0.1.0",
     "SERVE_INCLUDE_SCHEMA": False,
+    # Four different models each have their own "status" field — without
+    # this, drf-spectacular can't tell them apart and names the schema
+    # component after a hash instead of something readable.
+    "ENUM_NAME_OVERRIDES": {
+        "ProductStatusEnum": "catalog.models.Product.Status",
+        "OrderStatusEnum": "orders.models.Order.Status",
+        "PaymentStatusEnum": "payments.models.Payment.Status",
+        "ShipmentStatusEnum": "delivery.models.Shipment.Status",
+    },
 }
 
 SIMPLE_JWT = {

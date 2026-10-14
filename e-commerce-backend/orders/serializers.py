@@ -34,6 +34,22 @@ class OrderSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class OrderSummarySerializer(serializers.ModelSerializer):
+    """
+    A lighter row shape for admin listings — no items/status_history, which
+    would make a paginated staff order table fetch every line item of every
+    order on the page just to show a table row.
+    """
+
+    class Meta:
+        model = Order
+        fields = [
+            "id", "reference", "status", "currency", "total",
+            "contact_email", "contact_phone", "created_at",
+        ]
+        read_only_fields = fields
+
+
 class CheckoutSerializer(serializers.Serializer):
     """
     Either `address_id` (an existing accounts.Address) or the delivery
