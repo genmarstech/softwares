@@ -3,10 +3,17 @@ import fastify from "fastify";
 import health from "./routes/health.js";
 import format from "./routes/format.js";
 import fastifyRedis from "@fastify/redis";
+import cors from "@fastify/cors";
 
 
 
 const app = fastify({logger: true});
+
+await app.register(cors, {
+  origin: ['*'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  credentials: true,
+})
 
 const redisurl = process.env.REDIS_URL;
 
