@@ -21,6 +21,8 @@ class InventoryRecordViewSet(viewsets.ModelViewSet):
     queryset = InventoryRecord.objects.select_related("product", "variant")
     serializer_class = InventoryRecordSerializer
     permission_classes = [permissions.IsAdminUser]
+    filterset_fields = ["product", "variant"]
+    search_fields = ["product__name", "product__sku", "variant__sku"]
 
     @action(detail=True, methods=["post"])
     def adjust(self, request, pk=None):
