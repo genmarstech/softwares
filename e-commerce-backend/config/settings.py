@@ -9,6 +9,7 @@ need to change between dev and prod — only the environment does.
 from datetime import timedelta
 from pathlib import Path
 
+from celery.schedules import crontab
 from dotenv import load_dotenv
 import os
 
@@ -61,6 +62,7 @@ INSTALLED_APPS = [
     "orders",
     "payments",
     "delivery",
+    "analytics",
 ]
 
 MIDDLEWARE = [
@@ -189,6 +191,19 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TIMEZONE = TIME_ZONE
 
+# The only periodic task in this codebase so far -- everything in
+# inventory/tasks.py and delivery/tasks.py fires on_commit from a request,
+# never on a clock. No django-celery-beat here: this is one entry, and
+# Celery's own beat process (`celery -A config beat`) reads this dict
+# directly from app config -- Charter 03 section I, a second package buys
+# nothing a dict does not already do at this scale.
+CELERY_BEAT_SCHEDULE = {
+    "report-commerce-metrics-daily": {
+        "task": "analytics.tasks.report_commerce_metrics",
+        "schedule": crontab(hour=1, minute=0),
+    },
+}
+
 
 # CORS — explicit allowlist only. Never CORS_ALLOW_ALL_ORIGINS; this API
 # carries payment and personal-data endpoints.
@@ -237,6 +252,24 @@ MPESA_CALLBACK_URL = os.environ.get("MPESA_CALLBACK_URL", "")
 # and rejects everything if this is left blank — unconfigured means closed,
 # never open. Generate one with `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
 MPESA_CALLBACK_SECRET = os.environ.get("MPESA_CALLBACK_SECRET", "")
+
+
+# Genmars platform reporting -- this backend is a sibling product (see this
+# repo's own CLAUDE.md), and analytics/reporting.py POSTs a periodic
+# commerce-metrics snapshot to gen-portal, Genmars' core Django backend, a
+# SEPARATE service/repo reached over the network, not imported. The origin
+# is configurable because local dev talks to a gen-portal running on
+# localhost, not the real api.genmars.co.ke.
+GENMARS_API_ORIGIN = os.environ.get("GENMARS_API_ORIGIN", "https://api.genmars.co.ke")
+
+# A per-system API key gen-portal issues from its own ops UI, bearer-token
+# style. Treated exactly like the M-Pesa secrets just above (root CLAUDE.md,
+# "Handling secrets"): never logged, never printed, never included in an
+# exception message. It will genuinely be unset until a founder issues one
+# -- that only happens after this ships -- so analytics/reporting.py must
+# fail loudly (one log line) but safely (no raise that reaches Celery) when
+# this is blank, never silently skip the report or retry forever.
+GENMARS_SYSTEM_KEY = os.environ.get("GENMARS_SYSTEM_KEY", "")
 
 
 # Django REST Framework

@@ -1,7 +1,10 @@
 from rest_framework import viewsets
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import SAFE_METHODS
+from rest_framework.response import Response
 
+from analytics.models import StorefrontEvent
+from analytics.services import record as record_event
 from businesses.mixins import BusinessScopedMixin
 from businesses.permissions import IsBusinessManager, IsBusinessManagerOrReadOnly, IsBusinessMember, caller_role
 
@@ -49,6 +52,24 @@ class ProductViewSet(BusinessScopedMixin, viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(business=self.business)
+
+    def list(self, request, *args, **kwargs):
+        # One storefront "visit" per product-list request — see
+        # analytics/models.py. Logged after super().list() succeeds so a
+        # pagination/filter error never gets counted as a visit.
+        response = super().list(request, *args, **kwargs)
+        record_event(self.business, StorefrontEvent.EventType.VISIT)
+        return response
+
+    def retrieve(self, request, *args, **kwargs):
+        # Mirrors DRF's own RetrieveModelMixin.retrieve() rather than
+        # calling super() and then self.get_object() again, which would
+        # fetch the same row from the database twice for every single
+        # product page view.
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        record_event(self.business, StorefrontEvent.EventType.PRODUCT_VIEW, product=instance)
+        return Response(serializer.data)
 
 
 class ProductImageViewSet(BusinessScopedMixin, viewsets.ModelViewSet):

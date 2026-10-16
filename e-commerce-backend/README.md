@@ -33,6 +33,13 @@ To run background tasks (low-stock alerts, order-status emails):
 ./venv/bin/celery -A config worker -l info
 ```
 
+To run the daily scheduled job (the commerce-metrics report to gen-portal —
+see "Platform reporting" below), also run the beat process:
+
+```bash
+./venv/bin/celery -A config beat -l info
+```
+
 ## Tests
 
 ```bash
@@ -62,6 +69,25 @@ is a no-op), and cross-customer order access (404, not 403).
 `MPESA_ENABLED=False` by default — payments are off until real Daraja
 credentials are in `.env`. **No live STK push has been fired against this
 code.** That first call is yours, not something run on your behalf.
+
+## Platform reporting
+
+This backend is a sibling product to Genmars' core repos (see this repo's
+own CLAUDE.md). A daily job computes a platform-wide commerce-metrics
+snapshot (acquisition, revenue, storefront funnel, inventory, retention —
+see analytics/metrics.py for the exact shape and what it can and cannot
+honestly compute yet) and POSTs it to gen-portal, Genmars' own core Django
+backend, so the numbers show up in the company's internal ops dashboard.
+
+- `GENMARS_API_ORIGIN` / `GENMARS_SYSTEM_KEY` — see .env.example. The key is
+  a bearer token, issued by hand from gen-portal's own ops UI, and does not
+  exist until a founder issues one after this ships. Treat it exactly like
+  the M-Pesa secrets below: never commit it, never log it.
+- Runs daily via Celery beat (`CELERY_BEAT_SCHEDULE` in config/settings.py);
+  also runnable by hand: `./venv/bin/python manage.py report_commerce_metrics`.
+- A missing `GENMARS_SYSTEM_KEY` fails loudly (one log line, non-zero exit)
+  and safely (no raise that reaches the Celery worker loop, no retry storm)
+  — see analytics/reporting.py.
 
 ## Checklist coverage
 

@@ -5,6 +5,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import Address
+from analytics.models import StorefrontEvent
+from analytics.services import record as record_event
 from businesses.mixins import BusinessScopedMixin
 from cart.models import Cart
 from core.models import StoreSettings
@@ -101,5 +103,9 @@ class CheckoutView(BusinessScopedMixin, APIView):
             )
         except OrderError as exc:
             return Response({"detail": exc.safe_message}, status=400)
+
+        # The order is created AWAITING_PAYMENT here — this is the moment a
+        # cart becomes a checkout, see analytics/models.py.
+        record_event(self.business, StorefrontEvent.EventType.CHECKOUT_START)
 
         return Response(OrderSerializer(order).data, status=201)
