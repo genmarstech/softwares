@@ -1,0 +1,248 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Genmars commerce platform — API, on the shared Hetzner host.
+#
+#   docker compose -f compose.hetzner.yaml up -d --build
+#   docker compose -f compose.hetzner.yaml exec api python manage.py createsuperuser
+#   docker compose -f compose.hetzner.yaml down          # data survives — named volumes
+#
+# NOT deployed anywhere by this review — see docs/HETZNER_DEPLOYMENT.md for
+# the open decisions (subdomains, ports, Caddy) this file does not resolve.
+#
+# ── THE BINDING RULE (copied from gen-portal/compose.yaml on purpose) ───────
+# `api` publishes to 127.0.0.1 ONLY. The host's own Caddy terminates TLS and
+# proxies to it. "8010:8010" would bind 0.0.0.0 and expose plain HTTP to the
+# internet, bypassing TLS — a UFW "deny" would NOT stop it, because Docker
+# writes its own iptables rules ahead of UFW's.
+#
+# db and redis publish NOTHING — reachable only by name, on the `data`
+# network, from `api`.
+#
+# This is the SAME host that already runs gen-portal (and others) — see
+# docs/HETZNER_DEPLOYMENT.md's port table before picking real values below.
+# The ports here are placeholders, deliberately NOT gen-portal's 8010/3010,
+# and must be confirmed free on the real host before first deploy (this
+# session's own local Postgres port conflict, resolved earlier in this repo's
+# docker-compose.yml, is the exact failure mode a guessed port repeats).
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: genmars-commerce
+
+services:
+  # ---- database --------------------------------------------------------------
+
+  db:
+    image: postgres:17-alpine
+    container_name: genmars-commerce-db
+
+    networks:
+      - data
+    restart: unless-stopped
+
+    # No `ports:` — see the binding rule above.
+
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-genmars_ecommerce}
+      POSTGRES_USER: ${POSTGRES_USER:-genmars_ecommerce}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+
+    volumes:
+      - commerce-db:/var/lib/postgresql/data
+      # No /backups mount here, unlike gen-portal's copy of this file —
+      # scripts/backup.sh in THIS repo runs pg_dump via `docker compose
+      # exec` and redirects its stdout to `backups/` on the HOST side
+      # entirely (the gzip/encrypt happens outside the container), so a
+      # mount into the container would never actually be written to. Don't
+      # copy gen-portal's version of this back without checking that first.
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-genmars_ecommerce} -d ${POSTGRES_DB:-genmars_ecommerce}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+    security_opt:
+      - no-new-privileges:true
+
+    # A ceiling because this host is shared with other, already-live sites —
+    # see docs/HETZNER_DEPLOYMENT.md. Numbers copied from gen-portal's own db
+    # service as a starting point, not re-derived from this app's actual load
+    # (there isn't any real load yet to measure).
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          memory: 128M
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ---- cache / Celery broker --------------------------------------------------
+
+  redis:
+    image: redis:7-alpine
+    container_name: genmars-commerce-redis
+
+    networks:
+      - data
+    restart: unless-stopped
+
+    # `--save ""` + no appendonly: this is cache + Celery broker only, nothing
+    # here needs to survive a restart. Losing it resets the low-stock-alert /
+    # order-status-email queue, which just re-runs on the next trigger, and
+    # drops the response cache, which rebuilds on the next read.
+    #
+    # Password required even though nothing outside `data` can reach this —
+    # gen-portal's own redis carries the same password for the same reason:
+    # the network boundary is the first lock, this is the second, for the day
+    # something ends up on the wrong network by accident.
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+
+    command:
+      - "redis-server"
+      - "--requirepass"
+      - "${REDIS_PASSWORD:?REDIS_PASSWORD must be set}"
+      - "--save"
+      - ""
+      - "--appendonly"
+      - "no"
+      - "--maxmemory"
+      - "128mb"
+      - "--maxmemory-policy"
+      - "allkeys-lru"
+
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+    # Official image's own redis user — running as root would fail outright
+    # under cap_drop: ALL (no CAP_CHOWN to fix ownership of /data on start).
+    user: "999:1000"
+    read_only: true
+    tmpfs:
+      - /data:size=8m,mode=0770,uid=999,gid=1000,noexec,nosuid,nodev
+
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 192M
+        reservations:
+          memory: 32M
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---- Django API --------------------------------------------------------------
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: genmars-commerce-api:latest
+    container_name: genmars-commerce-api
+
+    volumes:
+      # A host BIND mount, not a directory in the image and not a named
+      # Docker volume either — deliberately, because scripts/backup.sh
+      # already does `tar czf ... media/` against a plain directory at the
+      # repo root, and a named volume would make that command silently back
+      # up nothing (Docker volumes aren't a path on disk backup.sh can see).
+      # This still solves the problem docs/RAILWAY_DEPLOYMENT.md describes
+      # for Railway — every uploaded image being lost on redeploy — because
+      # the image is rebuilt but this directory lives outside it, on this
+      # host's real persistent disk.
+      #
+      # Must exist and be owned by the container's app user BEFORE first
+      # start, or every upload fails with a permission error — see
+      # docs/HETZNER_DEPLOYMENT.md's first-deploy steps:
+      #   mkdir -p media && chown 10010:10010 media
+      - ./media:/app/media
+
+    networks:
+      - data
+    restart: unless-stopped
+
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    env_file:
+      - ./.env
+
+    environment:
+      # Overrides whatever .env says for these two — the names a container
+      # resolves on the `data` network, not .env's dev-local values.
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+
+    # Loopback only. Do not change to "8010:8010" — see the binding rule
+    # above. Port is a placeholder; confirm it's free on the real host first.
+    ports:
+      - "127.0.0.1:${COMMERCE_API_PORT:-8110}:8010"
+
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    # Read-only root filesystem: PYTHONDONTWRITEBYTECODE=1 (Dockerfile) means
+    # no .pyc is ever written, and gunicorn's scratch dir defaults to /tmp,
+    # which the tmpfs below provides. /app/media is a named volume and stays
+    # writable regardless — read_only governs the image's own filesystem, not
+    # mounts.
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777,noexec,nosuid,nodev
+
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          memory: 128M
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  commerce-db:
+
+# ─────────────────────────────────────────────────────────────────────────────
+# One network, internal only — db and redis never need to be reached from
+# outside this project, and neither does `api` from commerce-platform's own
+# stack: the frontend reaches this API over its public HTTPS URL, through
+# Caddy, the same way it would on Railway or anywhere else, rather than over
+# a shared compose network. See docs/HETZNER_DEPLOYMENT.md for why that's the
+# deliberate choice here, not an oversight — the short version is that
+# next/image's SSRF guard and this app's `images.remotePatterns` config are
+# both keyed off the API's hostname, and that hostname has to be the one
+# Django actually puts into the absolute image URLs it returns.
+# ─────────────────────────────────────────────────────────────────────────────
+networks:
+  data:
+    name: genmars-commerce_data
