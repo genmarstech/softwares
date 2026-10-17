@@ -32,3 +32,22 @@ class BusinessMembershipSerializer(serializers.ModelSerializer):
             if BusinessMembership.objects.filter(business=business, user=user).exists():
                 raise serializers.ValidationError({"user": "This user is already a member of this business."})
         return attrs
+
+
+class MyBusinessMembershipSerializer(serializers.ModelSerializer):
+    """
+    For GET /api/me/businesses/ — the one thing BusinessMembershipSerializer
+    above can't answer, because it's built for `/api/ops/<slug>/members/`
+    where the business is already known from the URL: "which businesses
+    does the CALLER belong to." The business itself is nested here because
+    that's the entire point of this endpoint — a caller with zero
+    memberships gets `[]`, not an error, and has no other way to discover
+    even one business's slug.
+    """
+
+    business = BusinessSerializer(read_only=True)
+
+    class Meta:
+        model = BusinessMembership
+        fields = ["id", "business", "role", "status", "created_at"]
+        read_only_fields = fields

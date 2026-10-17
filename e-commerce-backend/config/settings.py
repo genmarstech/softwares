@@ -164,6 +164,14 @@ STORAGES = {
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+# config/urls.py wires MEDIA_ROOT through django.views.static.serve when
+# this is True, and ALWAYS when DEBUG is True regardless of this flag -- a
+# ProductImage.image URL the API returns must be reachable locally without
+# a separate web server in front. In production, set this only when nothing
+# else (nginx, object storage) is already serving /media/ -- see that
+# route's own comment in config/urls.py.
+SERVE_MEDIA_VIA_DJANGO = env_bool("SERVE_MEDIA_VIA_DJANGO", False)
+
 # Enforced in catalog/serializers.py::ProductImageSerializer.validate_image
 # — DRF's ImageField already confirms Pillow can open the file (a real
 # image, not just a renamed binary) before these run; these two catch the
@@ -328,6 +336,8 @@ SPECTACULAR_SETTINGS = {
         "OrderStatusEnum": "orders.models.Order.Status",
         "PaymentStatusEnum": "payments.models.Payment.Status",
         "ShipmentStatusEnum": "delivery.models.Shipment.Status",
+        "BusinessStatusEnum": "businesses.models.Business.Status",
+        "BusinessMembershipStatusEnum": "businesses.models.BusinessMembership.MembershipStatus",
     },
 }
 

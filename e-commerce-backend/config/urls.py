@@ -40,8 +40,10 @@ businesses/models.py::RESERVED_SLUGS) precisely so a real business can never
 collide with any of the fixed segments above.
 """
 
+from django.conf import settings
 from django.contrib import admin
-from django.urls import include, path
+from django.urls import include, path, re_path
+from django.views.static import serve as serve_static
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 from core.health import HealthCheckView
@@ -51,6 +53,7 @@ urlpatterns = [
     path("health/", HealthCheckView.as_view(), name="health"),
     path("api/", include("accounts.urls")),
     path("api/", include("payments.urls")),
+    path("api/<slug:business_slug>/", include("core.public_urls")),
     path("api/<slug:business_slug>/", include("catalog.urls")),
     path("api/<slug:business_slug>/", include("inventory.urls")),
     path("api/<slug:business_slug>/", include("cart.urls")),
@@ -65,3 +68,21 @@ urlpatterns = [
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="docs"),
 ]
+
+# MEDIA_URL was never actually wired to anything — the comment on MEDIA_URL
+# in settings.py says uploads are "served by nginx/whitenoise in front in
+# production", but neither is configured anywhere in this repo, so every
+# ProductImage.image URL the API returns has been unreachable, dev and
+# prod alike, since the field was added (confirmed gap, flagged in
+# commerce-platform's own CLAUDE.md). Always on in DEBUG, since local dev
+# has no other way to see an uploaded image at all. In production, opt-in
+# via SERVE_MEDIA_VIA_DJANGO: django.views.static.serve is safe against
+# path traversal (Django's own safe_join) but isn't built for real load —
+# no caching headers, no compression — acceptable at pilot/demo scale on a
+# single-container platform with no separate static host, not a long-term
+# answer. Revisit with object storage (S3-compatible) before this needs to
+# hold more than a pilot's worth of traffic.
+if settings.DEBUG or settings.SERVE_MEDIA_VIA_DJANGO:
+    urlpatterns += [
+        re_path(r"^media/(?P<path>.*)$", serve_static, {"document_root": settings.MEDIA_ROOT}),
+    ]

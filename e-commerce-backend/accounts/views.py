@@ -8,6 +8,9 @@ from drf_spectacular.utils import extend_schema
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from businesses.models import BusinessMembership
+from businesses.serializers import MyBusinessMembershipSerializer
+
 from . import identity
 from .models import Address
 from .serializers import (
@@ -89,6 +92,31 @@ class MeView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
+
+
+class MyBusinessesView(APIView):
+    """
+    The one thing `/api/me/` doesn't answer: which businesses this user is
+    an active member of. Filtered by `user=request.user` ONLY — never
+    trusts anything from the request to widen it, so there is no id this
+    endpoint could be handed that would ever return another user's
+    memberships. Not paginated: a person's own membership count is always
+    small, and `{count, next, previous, results}` would be a strange shape
+    to force onto a handful of rows.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = MyBusinessMembershipSerializer
+
+    def get(self, request):
+        memberships = (
+            BusinessMembership.objects.filter(
+                user=request.user, status=BusinessMembership.MembershipStatus.ACTIVE
+            )
+            .select_related("business")
+            .order_by("business__name")
+        )
+        return Response(MyBusinessMembershipSerializer(memberships, many=True).data)
 
 
 class PasswordResetRequestView(APIView):

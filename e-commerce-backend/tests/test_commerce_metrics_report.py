@@ -176,17 +176,25 @@ class TestComputeMetricsKnownFixtures:
 
         assert metrics["inventory"]["products_out_of_stock"] >= 1
 
-    def test_theme_usage_is_empty_until_the_theme_field_exists(self, business):
-        # StoreSettings.theme lands in a separate change. Until it exists,
-        # reporting an empty dict is the honest answer, not an error — see
-        # analytics/metrics.py's own comment at the theme_usage block.
-        assert not hasattr(StoreSettings, "Theme")
+    def test_theme_usage_counts_stores_per_theme_now_the_field_exists(self, business, second_business):
+        # The getattr(StoreSettings, "Theme", None) fallback in
+        # analytics/metrics.py was written defensively, for a repo state
+        # where this field didn't exist yet — see its own comment at the
+        # theme_usage block. Now it does: this proves the real branch
+        # computes correctly rather than just not crashing.
+        assert hasattr(StoreSettings, "Theme")
+
+        for shop in (business, second_business):
+            settings = StoreSettings.load(shop)
+            settings.theme = StoreSettings.Theme.FASHION
+            settings.save()
 
         period_end = timezone.now()
         period_start = period_end - timedelta(hours=24)
         metrics = compute_metrics(period_start, period_end)
 
-        assert metrics["inventory"]["theme_usage"] == {}
+        assert metrics["inventory"]["theme_usage"]["fashion"] == 2
+        assert metrics["inventory"]["theme_usage"]["default"] == 0
 
     def test_businesses_active_with_storefront_requires_active_status_and_a_published_product(
         self, business, second_business, make_user
