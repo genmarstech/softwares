@@ -13,6 +13,7 @@ from django.db.models import Count, DecimalField, Sum, Value
 from django.db.models.functions import Coalesce
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -23,7 +24,7 @@ from orders.models import Order
 from orders.serializers import OrderSummarySerializer
 
 from .models import StoreSettings
-from .serializers import StoreSettingsSerializer
+from .serializers import PublicStoreInfoSerializer, StoreSettingsSerializer
 
 # A sale "counts" once payment has gone through, whatever happens to
 # fulfillment after that — cancelled/refunded orders are excluded entirely
@@ -48,6 +49,26 @@ class StoreSettingsView(BusinessScopedMixin, APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
+
+
+class PublicStoreInfoView(BusinessScopedMixin, APIView):
+    """
+    GET /api/<slug>/store/ — anonymous, read-only. 404s on an
+    unknown/suspended business exactly like every other public endpoint
+    (BusinessScopedMixin's own resolution), so this is never a slug-
+    existence oracle beyond what /products/ already is.
+
+    Intentionally GET-only: no patch() is defined here at all, so a write
+    attempt 405s rather than routing anywhere near a permission check —
+    changing a business's own theme/currency stays exclusively behind
+    StoreSettingsView's IsBusinessManager, above.
+    """
+
+    permission_classes = [AllowAny]
+    serializer_class = PublicStoreInfoSerializer
+
+    def get(self, request, business_slug=None):
+        return Response(PublicStoreInfoSerializer(StoreSettings.load(self.business)).data)
 
 
 class DashboardView(BusinessScopedMixin, APIView):

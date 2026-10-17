@@ -34,6 +34,23 @@ class StoreSettings(models.Model):
     1 seeded rather than crashing outright.
     """
 
+    class Theme(models.TextChoices):
+        """
+        A storefront *design pattern*, not a color swap — each value maps
+        to a genuinely different frontend layout (commerce-platform's
+        src/lib/themes/registry.ts): grid density, card style, hero
+        treatment, typography. New values are additive — the frontend's own
+        registry is the other half of this enum and has to grow alongside
+        it; an unrecognized value there falls back to DEFAULT rather than
+        erroring, so adding a choice here first and shipping the frontend
+        side a moment later never breaks a live store in between.
+        """
+
+        DEFAULT = "default", "Default — clean, general-purpose grid"
+        FASHION = "fashion", "Fashion — editorial, lookbook-style"
+        ELECTRONICS = "electronics", "Electronics — spec-forward, dense grid"
+        GROCERY = "grocery", "Fresh/Grocery — vibrant, quick-add"
+
     business = models.OneToOneField(
         "businesses.Business",
         on_delete=models.CASCADE,
@@ -43,6 +60,7 @@ class StoreSettings(models.Model):
     currency = models.CharField(max_length=3, default="KES")
     default_delivery_fee = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     low_stock_default_threshold = models.PositiveIntegerField(default=5)
+    theme = models.CharField(max_length=20, choices=Theme.choices, default=Theme.DEFAULT)
 
     class Meta:
         verbose_name = "Store settings"
