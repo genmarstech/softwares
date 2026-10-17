@@ -86,6 +86,28 @@ def test_product_image_detail_write_and_delete_blocked_by_id_substitution(
 
 
 @pytest.mark.django_db
+def test_cannot_patch_an_existing_product_images_product_onto_another_businesss_product(
+    business_owner_client, product_with_stock, second_business
+):
+    """
+    perform_create() alone checked product.business — nothing stopped a
+    PATCH to an existing, own-business image from reassigning `product`
+    straight onto another business's product instead. Same class of bug as
+    the cart-item one; fixed in ProductImageSerializer.validate_product().
+    """
+    own_product, _ = product_with_stock(sku="SUBST-IMG-OWN")
+    other_product, _ = product_with_stock(business=second_business, sku="SUBST-IMG-OTHER")
+    image = ProductImage.objects.create(product=own_product, sort_order=0)
+
+    response = business_owner_client.patch(
+        f"/api/genmars-store/product-images/{image.id}/", {"product": other_product.id}, format="json"
+    )
+    assert response.status_code == 400
+    image.refresh_from_db()
+    assert image.product_id == own_product.id
+
+
+@pytest.mark.django_db
 def test_product_variant_detail_write_and_delete_blocked_by_id_substitution(
     business_owner_client, product_with_stock, second_business
 ):
@@ -105,6 +127,25 @@ def test_product_variant_detail_write_and_delete_blocked_by_id_substitution(
     assert delete_resp.status_code == 404
     variant_b.refresh_from_db()
     assert variant_b.value == "M"
+
+
+@pytest.mark.django_db
+def test_cannot_patch_an_existing_variants_product_onto_another_businesss_product(
+    business_owner_client, product_with_stock, second_business
+):
+    """Same fix as the ProductImage case above, applied to ProductVariant."""
+    own_product, _ = product_with_stock(sku="SUBST-VAR-OWN")
+    other_product, _ = product_with_stock(business=second_business, sku="SUBST-VAR-OTHER")
+    variant = ProductVariant.objects.create(
+        product=own_product, business=own_product.business, name="Size", value="M", sku="SUBST-VAR-OWN-M"
+    )
+
+    response = business_owner_client.patch(
+        f"/api/genmars-store/product-variants/{variant.id}/", {"product": other_product.id}, format="json"
+    )
+    assert response.status_code == 400
+    variant.refresh_from_db()
+    assert variant.product_id == own_product.id
 
 
 # ── Inventory ────────────────────────────────────────────────────────────
@@ -131,6 +172,28 @@ def test_inventory_record_write_delete_and_movements_blocked_by_id_substitution(
     assert adjust_resp.status_code == 404
     record_b.refresh_from_db()
     assert record_b.quantity == 10  # untouched — the adjust attempt never ran
+
+
+@pytest.mark.django_db
+def test_cannot_patch_an_existing_inventory_records_product_onto_another_businesss_product(
+    business_owner_client, product_with_stock, second_business
+):
+    """
+    perform_create() alone checked product/variant business ownership —
+    nothing stopped a PATCH to an existing, own-business InventoryRecord
+    from reassigning `product` onto another business's product, which would
+    hijack that other business's stock tracking under this business's
+    record. Fixed in InventoryRecordSerializer.validate().
+    """
+    own_product, own_record = product_with_stock(sku="SUBST-INV-OWN")
+    other_product, _ = product_with_stock(business=second_business, sku="SUBST-INV-OTHER")
+
+    response = business_owner_client.patch(
+        f"/api/genmars-store/inventory/{own_record.id}/", {"product": other_product.id}, format="json"
+    )
+    assert response.status_code == 400
+    own_record.refresh_from_db()
+    assert own_record.product_id == own_product.id
 
 
 # ── Cart items ───────────────────────────────────────────────────────────

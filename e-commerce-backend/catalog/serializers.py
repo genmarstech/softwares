@@ -31,6 +31,19 @@ class ProductImageSerializer(serializers.ModelSerializer):
         model = ProductImage
         fields = ["id", "product", "image", "sort_order"]
 
+    def validate_product(self, value):
+        # Must run on update as well as create — ProductImageViewSet's own
+        # perform_create() checks this for a new row, but nothing stopped a
+        # PATCH to an EXISTING image (one already scoped to this business via
+        # get_queryset()) from reassigning its `product` straight onto
+        # another business's product instead. Same class of bug as
+        # cart/serializers.py's CartItemSerializer.validate() fix — checked
+        # here so both create and update share one enforcement point.
+        business = self.context.get("business")
+        if business and value.business_id != business.pk:
+            raise serializers.ValidationError("That product does not belong to this business.")
+        return value
+
     def validate_image(self, value):
         # DRF's ImageField has already made Pillow open this and confirmed
         # it's a genuine image by the time this runs — content validation
@@ -61,6 +74,16 @@ class ProductVariantSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProductVariant
         fields = ["id", "product", "name", "value", "sku", "price_override", "price"]
+
+    def validate_product(self, value):
+        # Same reasoning as ProductImageSerializer.validate_product above —
+        # ProductVariantViewSet.perform_create() only checks this for a new
+        # row; without this, a PATCH to an existing variant could reassign
+        # it onto another business's product.
+        business = self.context.get("business")
+        if business and value.business_id != business.pk:
+            raise serializers.ValidationError("That product does not belong to this business.")
+        return value
 
     def validate_sku(self, value):
         # Same reasoning as Category/Product above — a variant's sku is

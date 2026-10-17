@@ -197,6 +197,43 @@ def test_cannot_add_another_businesss_product_to_this_businesss_cart(
     assert response.status_code == 400
 
 
+@pytest.mark.django_db
+def test_cannot_patch_an_existing_cart_item_onto_another_businesss_product(
+    auth_client, product_with_stock, second_business
+):
+    """
+    The create path (test above) is only half the check — this is the one
+    that was actually missing: CartItemViewSet.perform_create() enforced
+    product.business == this business, but nothing stopped a PATCH/PUT to an
+    EXISTING item from changing its `product` straight past that check
+    (perform_update() has no override, so DRF's default just saves the
+    serializer). Confirmed exploitable before the fix: a genmars-store cart
+    item PATCHed to acme-fashion's product id survived to checkout, created
+    a real genmars-store Order containing acme-fashion's product, and
+    decremented acme-fashion's own stock for an order acme-fashion's own
+    ops views would never show. The check now lives in
+    CartItemSerializer.validate(), which both create and update run.
+    """
+    own_product, _ = product_with_stock(sku="A-SKU-OWN")
+    other_product, _ = product_with_stock(business=second_business, sku="B-SKU-OTHER")
+
+    add = auth_client.post(
+        "/api/genmars-store/cart/items/", {"product": own_product.id, "quantity": 1}, format="json"
+    )
+    assert add.status_code == 201
+    item_id = add.data["id"]
+
+    patch = auth_client.patch(
+        f"/api/genmars-store/cart/items/{item_id}/", {"product": other_product.id}, format="json"
+    )
+    assert patch.status_code == 400
+
+    from cart.models import CartItem
+
+    item = CartItem.objects.get(pk=item_id)
+    assert item.product_id == own_product.id  # untouched
+
+
 # ── Orders ───────────────────────────────────────────────────────────────
 
 
