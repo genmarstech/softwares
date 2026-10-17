@@ -1,5 +1,4 @@
 from rest_framework import permissions, viewsets
-from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -32,17 +31,13 @@ class CartItemViewSet(BusinessScopedMixin, viewsets.ModelViewSet):
         ).select_related("product", "variant")
 
     def perform_create(self, serializer):
+        # The product/variant-belongs-to-this-business check lives in
+        # CartItemSerializer.validate() — shared with update/partial_update,
+        # so it can't be bypassed by PATCHing an existing item's product
+        # instead of creating a new one.
         cart, _ = Cart.objects.get_or_create(user=self.request.user, business=self.business)
         product = serializer.validated_data["product"]
         variant = serializer.validated_data.get("variant")
-
-        # A business's storefront must never let a customer add another
-        # business's product to the cart it's resolved for — the product
-        # picker only ever offers this business's own catalog, so reaching
-        # this means the request didn't come from that picker.
-        owner = variant.product if variant else product
-        if owner.business_id != self.business.pk:
-            raise ValidationError({"product": "That product is not sold by this business."})
 
         existing = CartItem.objects.filter(cart=cart, product=product, variant=variant).first()
         if existing:

@@ -1,6 +1,5 @@
 from rest_framework import viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from businesses.mixins import BusinessScopedMixin
@@ -41,11 +40,8 @@ class InventoryRecordViewSet(BusinessScopedMixin, viewsets.ModelViewSet):
         return InventoryRecord.objects.filter(business=self.business).select_related("product", "variant")
 
     def perform_create(self, serializer):
-        product = serializer.validated_data.get("product")
-        variant = serializer.validated_data.get("variant")
-        owner = variant.product if variant else product
-        if owner is None or owner.business_id != self.business.pk:
-            raise ValidationError({"product": "That product does not belong to this business."})
+        # product/variant-belongs-to-this-business is enforced in
+        # InventoryRecordSerializer.validate() — shared with update.
         serializer.save(business=self.business)
 
     @action(detail=True, methods=["post"])

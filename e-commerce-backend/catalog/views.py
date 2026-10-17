@@ -1,5 +1,4 @@
 from rest_framework import viewsets
-from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import SAFE_METHODS
 from rest_framework.response import Response
 
@@ -86,11 +85,8 @@ class ProductImageViewSet(BusinessScopedMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         return ProductImage.objects.filter(product__business=self.business)
 
-    def perform_create(self, serializer):
-        product = serializer.validated_data["product"]
-        if product.business_id != self.business.pk:
-            raise ValidationError({"product": "That product does not belong to this business."})
-        serializer.save()
+    # product-belongs-to-this-business is enforced in
+    # ProductImageSerializer.validate_product() — shared with update.
 
 
 class ProductVariantViewSet(BusinessScopedMixin, viewsets.ModelViewSet):
@@ -104,7 +100,9 @@ class ProductVariantViewSet(BusinessScopedMixin, viewsets.ModelViewSet):
         return ProductVariant.objects.filter(product__business=self.business)
 
     def perform_create(self, serializer):
-        product = serializer.validated_data["product"]
-        if product.business_id != self.business.pk:
-            raise ValidationError({"product": "That product does not belong to this business."})
-        serializer.save(business=product.business)
+        # product-belongs-to-this-business is enforced in
+        # ProductVariantSerializer.validate_product() — shared with update.
+        # This still needs to inject `business` itself: a variant has its
+        # own denormalized `business` FK (catalog/models.py), which nothing
+        # else sets on create.
+        serializer.save(business=serializer.validated_data["product"].business)
