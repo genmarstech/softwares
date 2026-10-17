@@ -3,6 +3,8 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from analytics.models import StorefrontEvent
+from analytics.services import record as record_event
 from businesses.mixins import BusinessScopedMixin
 
 from .models import Cart, CartItem
@@ -49,3 +51,5 @@ class CartItemViewSet(BusinessScopedMixin, viewsets.ModelViewSet):
             serializer.instance = existing
         else:
             serializer.save(cart=cart)
+
+        record_event(self.business, StorefrontEvent.EventType.ADD_TO_CART, product=product)
