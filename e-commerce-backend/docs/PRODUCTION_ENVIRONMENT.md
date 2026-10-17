@@ -14,9 +14,10 @@ version with what's actually required versus merely available.
 | `ALLOWED_HOSTS` | `localhost,127.0.0.1` | Must list the real production hostname(s) or Django refuses every request. |
 | `POSTGRES_PASSWORD` | empty | No real password, no real database. |
 | `CORS_ALLOWED_ORIGINS` | empty | Must list the real storefront/admin frontend origin(s). Never `*` — already enforced by never offering that as an option in settings.py. |
-| `EMAIL_BACKEND` + `EMAIL_HOST`/`EMAIL_PORT`/`EMAIL_HOST_USER`/`EMAIL_HOST_PASSWORD`/`EMAIL_USE_TLS` | console backend | See "Email" below — this is the one `check --deploy` finding that's persisted through every review in this project, because it's genuinely a deployment-time decision, not a code defect. |
+| `EMAIL_BACKEND` + either `RESEND_API_KEY` (set `EMAIL_BACKEND=accounts.mail_backends.ResendBackend`) or `EMAIL_HOST`/`EMAIL_PORT`/`EMAIL_HOST_USER`/`EMAIL_HOST_PASSWORD`/`EMAIL_USE_TLS` (SMTP) | console backend | See "Email" below — on Hetzner, use the Resend backend; outbound SMTP is blocked there (see `docs/HETZNER_DEPLOYMENT.md`). This was the one `check --deploy` finding that persisted through every review in this project; confirmed resolved once `EMAIL_BACKEND=accounts.mail_backends.ResendBackend` and a real `RESEND_API_KEY` are set. |
 | `MPESA_ENABLED` + `MPESA_CONSUMER_KEY`/`MPESA_CONSUMER_SECRET`/`MPESA_SHORT_CODE`/`MPESA_CONSUMER_PASSKEY`/`MPESA_TILL_NUMBER`/`MPESA_CALLBACK_URL`/`MPESA_CALLBACK_SECRET` | disabled / blank | Required for any real M-Pesa flow. `MPESA_CALLBACK_SECRET` must be set to a real random value — if blank, the callback endpoint rejects everything (fail-closed, documented in `payments/views.py`), so this isn't "forgot to configure," it's "payments silently never confirm." |
 | `BACKUP_GPG_RECIPIENT` | unset (plain, unencrypted dumps) | See `docs/BACKUP_AND_RECOVERY.md` — required before any backup of a database holding real customer data. |
+| `DJANGO_TRUST_PROXY_HEADERS` | `False` | **Must be set `True` once, and only once, Django's only network path is confirmed to be through a trusted TLS-terminating proxy** (Railway's edge, or your own nginx) — see `config/settings.py`'s own comment. Left `False` behind a real proxy, every request redirect-loops (`SECURE_SSL_REDIRECT` thinks every request is insecure); set `True` with no real proxy in front lets anyone spoof the header it then trusts. See `docs/RAILWAY_DEPLOYMENT.md` for the Railway-specific case. |
 
 ## Required, with a safe-enough dev default that still needs a deliberate choice
 
@@ -34,17 +35,36 @@ version with what's actually required versus merely available.
 | `MPESA_TRANSACTION_TYPE` | `CustomerBuyGoodsOnline` | Fine unless the till setup differs. |
 | `PRODUCT_IMAGE_MAX_BYTES` | 5MB | Phase 4C addition — reasonable default, override only if there's a specific reason. |
 | `PRODUCT_IMAGE_MAX_DIMENSION_PX` | 4000px | Same. |
+| `CSRF_TRUSTED_ORIGINS` | empty | Only needed if `/admin/` ever fails with "CSRF verification failed" despite `ALLOWED_HOSTS` being correct. |
+| `SERVE_MEDIA_VIA_DJANGO` | `False` | Set `True` if there's no separate place serving `/media/` (object storage, nginx) — see "Media storage" below. Always on regardless of this flag when `DEBUG=True`. |
 
-## Email — the one standing `check --deploy` finding
+## Email — resolved via Resend, not SMTP
 
 `config/settings.py`'s `MAILERS` branches correctly: the console backend
 (dev default) rejects `host`/`port`/etc. as unknown options, so those are
 only included when `EMAIL_BACKEND` actually ends in `smtp.EmailBackend`.
 This has been re-verified, unchanged, in every review this project has had.
-**Required for production**: set `EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend`
-plus the four `EMAIL_*` host/port/credential variables. Until that's set,
-`manage.py check --deploy` will keep reporting `mail.E001` — correctly, not
-spuriously.
+
+**On Hetzner, don't use SMTP** — it blocks outbound mail ports on new
+accounts (see `docs/HETZNER_DEPLOYMENT.md`), the same constraint gen-portal
+hit first. `accounts/mail_backends.py` (new, mirrors gen-portal's own file of
+the same name) sends through Resend's HTTPS API instead, no new dependency —
+one JSON POST via stdlib `urllib`. Set `EMAIL_BACKEND=accounts.mail_backends.ResendBackend`
+and a real `RESEND_API_KEY`.
+
+**Confirmed this review**: `manage.py check --deploy --fail-level WARNING`
+under a prod-like env (`DEBUG=False`, real `SECRET_KEY`, both set) now
+reports **zero issues** — this resolves `mail.E001`, the one finding that had
+persisted through every prior review of this project. 12 new tests in
+`tests/test_mail_resend.py` cover the backend itself (payload shape, the
+Cloudflare User-Agent requirement, every error path, and — the one that
+matters most — that a customer's phone number/address and the API key never
+reach a log line).
+
+SMTP (`EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend` plus the
+four `EMAIL_*` host/port/credential variables) is still what the code
+supports if this is ever hosted somewhere that doesn't block outbound SMTP —
+nothing about that path changed.
 
 ## Secrets hygiene — verified this review, not assumed
 
@@ -65,6 +85,21 @@ spuriously.
 - `core/exceptions.py`'s fallback handler logs the real exception
   server-side (now tagged with the request id — see Phase 4B) and returns
   only a generic message to the client; confirmed unchanged by this review.
+
+## Media storage — ephemeral filesystems lose it
+
+`MEDIA_ROOT` (`media/`, product images) is a plain directory on whatever
+filesystem the process runs on. That's fine on a host with a persistent
+disk; it is **not** fine on a platform whose container filesystem resets on
+every redeploy (Railway's default, and most managed-container platforms'
+default) — every uploaded product image would be lost the next time the
+app redeploys, while the `ProductImage` rows pointing at them survive in
+Postgres. Before any real product image is uploaded against a managed
+deployment: attach that platform's persistent-volume feature (a Railway
+Volume, for example) mounted at the path `MEDIA_ROOT` resolves to, or move
+to object storage (S3-compatible) — the second is a real architecture
+change, not done in this review since nothing yet requires it at pilot
+scale. See `docs/RAILWAY_DEPLOYMENT.md`.
 
 ## Deployment checks, re-run this session
 

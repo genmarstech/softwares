@@ -3,13 +3,18 @@
 ## What actually exists
 
 `scripts/backup.sh` — already existed in the original MVP commit
-(`e3af3fd`), extended in this review to support optional encryption at
-rest. It dumps the database running in this repo's own `docker-compose.yml`
-`db` service with `pg_dump`, gzips it, and writes it to `backups/`
-(gitignored). There is **no restore script**, by deliberate design stated
-in the script's own comment: restoring is rare and destructive enough that
-it should stay a reviewed, deliberate command a human runs, not something
-automated enough to run on autopilot. This document is that command.
+(`e3af3fd`), extended in an earlier review to support optional encryption
+at rest, and extended again in the Phase 6 pilot-readiness review to also
+back up `MEDIA_ROOT` (product images) — a confirmed gap before that: a
+database restore brought back every `ProductImage` *row*, pointing at
+files a database-only backup never actually saved anywhere. It dumps the
+database running in this repo's own `docker-compose.yml` `db` service with
+`pg_dump`, gzips it, tars+gzips `media/` separately, and writes both to
+`backups/` (gitignored). There is **no restore script**, by deliberate
+design stated in the script's own comment: restoring is rare and
+destructive enough that it should stay a reviewed, deliberate command a
+human runs, not something automated enough to run on autopilot. This
+document is that command.
 
 ```bash
 ./scripts/backup.sh
@@ -46,6 +51,9 @@ exist on the machine taking the backup, exactly as it does for `gen-portal`.
      docker compose exec -T db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
    ```
    For a GPG-encrypted dump, decrypt first: `gpg --decrypt backups/<file>.sql.gz.gpg | gunzip | docker compose exec -T db psql ...`
+3b. Restore media alongside it: `tar xzf backups/media_<timestamp>.tar.gz -C <restore target>` (or
+   `gpg --decrypt backups/media_<timestamp>.tar.gz.gpg | tar xz -C <restore target>` if encrypted) —
+   a database-only restore brings back `ProductImage` rows pointing at files that were never restored.
 4. **Verify before cutting over** — at minimum:
    ```bash
    ./venv/bin/python manage.py check
@@ -149,3 +157,13 @@ failure this is meant to protect against.
   project.
 - Encryption is opt-in via an env var, not enforced — nothing in the script
   refuses to run unencrypted; it only warns.
+- The rehearsal above predates the media-backup addition and only verified
+  the database half. Re-verified separately in the Phase 6 pilot-readiness
+  review: a real `pg_dump | gzip` of a seeded database (2 businesses, 21
+  products, 24 inventory records), restored into a fresh, disposable
+  Postgres container, came back with every row count and relationship
+  intact (`manage.py check` and `makemigrations --check --dry-run` both
+  clean against the restored schema). The media-tar logic was verified
+  separately (a real `media/` directory with actual uploaded product
+  images, tarred and listed back out correctly) but not yet exercised
+  through a full combined database+media restore in one rehearsal.
