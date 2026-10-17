@@ -191,16 +191,25 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TIMEZONE = TIME_ZONE
 
-# The only periodic task in this codebase so far -- everything in
-# inventory/tasks.py and delivery/tasks.py fires on_commit from a request,
-# never on a clock. No django-celery-beat here: this is one entry, and
-# Celery's own beat process (`celery -A config beat`) reads this dict
-# directly from app config -- Charter 03 section I, a second package buys
-# nothing a dict does not already do at this scale.
+# Everything in inventory/tasks.py and delivery/tasks.py fires on_commit
+# from a request, never on a clock -- these two are the only periodic tasks.
+# No django-celery-beat here: two entries, and Celery's own beat process
+# (`celery -A config beat`) reads this dict directly from app config --
+# Charter 03 section I, a second package buys nothing a dict does not
+# already do at this scale.
 CELERY_BEAT_SCHEDULE = {
     "report-commerce-metrics-daily": {
         "task": "analytics.tasks.report_commerce_metrics",
         "schedule": crontab(hour=1, minute=0),
+    },
+    # Separate from the metrics report above on purpose -- see
+    # analytics/reporting.py::post_heartbeat's own note. Every five minutes
+    # keeps this comfortably inside gen-portal's 30-minute heartbeat-is-stale
+    # window (portal/models.py::System.heartbeat_is_stale) with room to spare
+    # for a missed tick or two.
+    "report-commerce-heartbeat": {
+        "task": "analytics.tasks.report_commerce_heartbeat",
+        "schedule": crontab(minute="*/5"),
     },
 }
 
