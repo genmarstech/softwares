@@ -97,6 +97,16 @@ def create_order_from_cart(
         raise OrderError("business_mismatch", "This cart does not belong to that business.")
     business = business or cart.business
 
+    # Locks the cart itself before reading its items — without this, two
+    # checkout requests racing on the same cart (a double-tapped "place
+    # order", or a client retrying a slow-but-successful request) can both
+    # read the same non-empty item list before either one's cart.items.all()
+    # .delete() commits, and both go on to create a real Order. The
+    # InventoryRecord locks below stop that from overselling stock, but they
+    # don't stop the duplicate order — only locking the cart row itself,
+    # ahead of everything else, does: the second caller blocks here until the
+    # first transaction commits (and empties the cart), then sees it empty.
+    cart = Cart.objects.select_for_update().get(pk=cart.pk)
     items = list(cart.items.select_related("product", "variant").order_by("product_id"))
     if not items:
         raise OrderError("empty_cart", "Your cart is empty.")
