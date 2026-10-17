@@ -10,6 +10,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from celery.schedules import crontab
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 import os
 
@@ -34,9 +35,30 @@ def env_int(name: str, default: int) -> int:
     return int(value) if value else default
 
 
-SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-dev-only-key")
+_DEV_ONLY_SECRET_KEY = "django-insecure-dev-only-key"
+
+SECRET_KEY = os.environ.get("SECRET_KEY", _DEV_ONLY_SECRET_KEY)
 DEBUG = env_bool("DEBUG", False)
 ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", "localhost,127.0.0.1")
+
+# `manage.py check --deploy` already flags a weak/default SECRET_KEY
+# (security.W009), but that check is opt-in — nothing stops this process
+# from simply booting and serving real traffic with the well-known dev
+# fallback above if whoever deployed it forgot to set the env var. That
+# fallback is also djangorestframework-simplejwt's SIGNING_KEY by default
+# (SIMPLE_JWT below sets no override), so a SECRET_KEY left at this value
+# in production doesn't just weaken session/CSRF signing — it means every
+# access and refresh token this API issues is forgeable by anyone who has
+# read this file. Missing-critical-config must fail loudly here, not
+# silently serve traffic with a key that's sitting in this repo's own
+# source. Scoped to `not DEBUG` so local dev (which never sets SECRET_KEY)
+# is unaffected.
+if not DEBUG and SECRET_KEY == _DEV_ONLY_SECRET_KEY:
+    raise ImproperlyConfigured(
+        "SECRET_KEY must be set to a real, random value when DEBUG=False — "
+        "refusing to start with the well-known dev default in what looks "
+        "like a production configuration."
+    )
 
 
 # Application definition
@@ -226,6 +248,18 @@ CELERY_BEAT_SCHEDULE = {
 # carries payment and personal-data endpoints.
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS")
 
+# CSRF_TRUSTED_ORIGINS — Django's own default (empty) is correct and safe
+# for this deployment's normal shape: the only session-authenticated,
+# CSRF-checked surface is /admin/, reached directly at ALLOWED_HOSTS'
+# own scheme+host, where Origin/Referer already match without needing
+# this. Left as an explicit, env-driven empty default (mirroring
+# ALLOWED_HOSTS/CORS_ALLOWED_ORIGINS above) rather than omitted, so the
+# knob exists without guessing a value: set it only if admin sign-in
+# starts failing with "CSRF verification failed" in a real deployment
+# despite ALLOWED_HOSTS being correct — e.g. admin reached through a
+# path-rewriting proxy that changes the Host the browser sees.
+CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS")
+
 
 # Email — Django's MAILERS config (EMAIL_HOST/EMAIL_PORT/etc. are deprecated
 # in favour of this as of this Django version). OPTIONS is backend-specific —
@@ -359,6 +393,25 @@ if not DEBUG:
     SECURE_HSTS_SECONDS = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
+
+# SECURE_SSL_REDIRECT above (and request.is_secure() generally) trusts the
+# connection Django itself terminates — which is never TLS once this sits
+# behind any reverse proxy or platform edge (Railway, nginx, a load
+# balancer), because the proxy terminates TLS and forwards plain HTTP
+# internally. Left alone, that makes every request look insecure to Django,
+# and SECURE_SSL_REDIRECT then redirects every one of them — to itself,
+# forever. The fix (trusting X-Forwarded-Proto) is also a real risk if
+# Django is ever reachable by *any other path* than through that proxy: an
+# attacker who can reach Django directly could then forge that header and
+# defeat the HTTPS-redirect/secure-cookie protections it's there to
+# enforce. So this is opt-in and off by default — flip it only once the
+# deployment topology is actually confirmed, i.e. once Django's only
+# network path is through a proxy you trust to set this header honestly
+# and strip/overwrite any client-supplied one. Confirmed safe to enable
+# on Railway specifically: a Railway service's container is reachable only
+# through Railway's own edge, which sets this header itself.
+if env_bool("DJANGO_TRUST_PROXY_HEADERS", False):
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 
 LOGGING = {
