@@ -240,6 +240,11 @@ MAILERS = {
 }
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "store@genmars.co.ke")
 
+# Read by accounts/mail_backends.py when EMAIL_BACKEND is set to
+# "accounts.mail_backends.ResendBackend" — see that module for why this
+# exists (Hetzner blocks outbound SMTP) and why it isn't the default.
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+
 
 # M-Pesa Daraja — see payments/mpesa.py for everything this must never do.
 
