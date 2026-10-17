@@ -1,7 +1,10 @@
 """
 POSTs the computed metrics snapshot (analytics/metrics.py) to gen-portal —
 Genmars' own core Django backend, a SEPARATE service/repo, reached only over
-the network — at `{GENMARS_API_ORIGIN}/api/systems/metrics`.
+the network — at `{GENMARS_API_ORIGIN}/api/systems/metrics`. Also carries
+`post_heartbeat()`, a much smaller "I am running" POST to the same host's
+`/api/systems/heartbeat` — see that function's own note on why it exists
+separately from the metrics report.
 
 ── NO NEW DEPENDENCY ────────────────────────────────────────────────────────
 Charter 03 section I, same reasoning as payments/mpesa.py: this is one JSON
@@ -40,12 +43,13 @@ log = logging.getLogger(__name__)
 TIMEOUT = 30
 USER_AGENT = "genmars-commerce (+https://genmars.co.ke)"
 METRICS_PATH = "/api/systems/metrics"
+HEARTBEAT_PATH = "/api/systems/heartbeat"
 
 
 class ReportingError(Exception):
-    """Something kept the metrics snapshot from reaching gen-portal. The
-    message is safe to log and to print to a console — it never carries
-    GENMARS_SYSTEM_KEY or any other credential."""
+    """Something kept the metrics snapshot or the heartbeat from reaching
+    gen-portal. The message is safe to log and to print to a console — it
+    never carries GENMARS_SYSTEM_KEY or any other credential."""
 
 
 def _json_default(value):
@@ -104,3 +108,55 @@ def post_metrics(period_start: datetime, period_end: datetime, metrics: dict) ->
     except urllib.error.URLError as exc:
         log.error("gen-portal metrics report: could not reach %s (%s)", url, exc.reason)
         raise ReportingError("Could not reach gen-portal to report commerce metrics.") from exc
+
+
+def post_heartbeat(version: str = "") -> None:
+    """
+    "I am running" — separate from post_metrics() on purpose.
+
+    The daily metrics report is what makes /commerce show real numbers; this
+    is what makes the Systems registry's "unwatched" count and heartbeat-
+    staleness check mean something for this system, the same way every other
+    registered system in gen-portal.System earns that by calling in. A
+    system can be reporting metrics correctly and still read as unwatched
+    if nothing ever calls this — they answer different questions.
+    """
+    api_key = getattr(settings, "GENMARS_SYSTEM_KEY", "") or ""
+    if not api_key:
+        raise ReportingError(
+            "GENMARS_SYSTEM_KEY is not set — cannot send a heartbeat to "
+            "gen-portal. A founder issues one from gen-portal's ops UI "
+            "(Settings -> Engineering -> Systems); set it in this service's "
+            "environment once issued."
+        )
+
+    origin = getattr(settings, "GENMARS_API_ORIGIN", "") or "https://api.genmars.co.ke"
+    url = origin.rstrip("/") + HEARTBEAT_PATH
+
+    payload = {"version": version} if version else {}
+    body = json.dumps(payload).encode()
+
+    request = urllib.request.Request(
+        url,
+        data=body,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+            if not (200 <= response.status < 300):
+                text = response.read().decode(errors="replace")[:400]
+                log.error("gen-portal heartbeat -> unexpected status %s: %s", response.status, text)
+                raise ReportingError(f"gen-portal returned HTTP {response.status}.")
+    except urllib.error.HTTPError as exc:
+        text = exc.read().decode(errors="replace")[:400]
+        log.error("gen-portal heartbeat -> %s %s", exc.code, text)
+        raise ReportingError(f"gen-portal rejected the heartbeat (HTTP {exc.code}).") from exc
+    except urllib.error.URLError as exc:
+        log.error("gen-portal heartbeat: could not reach %s (%s)", url, exc.reason)
+        raise ReportingError("Could not reach gen-portal to send a heartbeat.") from exc
