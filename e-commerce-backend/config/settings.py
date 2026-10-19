@@ -201,6 +201,16 @@ SERVE_MEDIA_VIA_DJANGO = env_bool("SERVE_MEDIA_VIA_DJANGO", False)
 PRODUCT_IMAGE_MAX_BYTES = env_int("PRODUCT_IMAGE_MAX_BYTES", 5 * 1024 * 1024)  # 5MB
 PRODUCT_IMAGE_MAX_DIMENSION_PX = env_int("PRODUCT_IMAGE_MAX_DIMENSION_PX", 4000)
 
+# Django's own default (2.5MB) gates the WHOLE multipart request body
+# BEFORE PRODUCT_IMAGE_MAX_BYTES above ever runs — confirmed live: an
+# upload between 2.5MB and the 5MB this app already says it allows was
+# silently rejected with a bare 400 and none of that validator's actual
+# message. Padded past PRODUCT_IMAGE_MAX_BYTES for the request's other
+# multipart fields (product id, sort_order), so the real, explained limit
+# stays the validator's, not this one firing first.
+DATA_UPLOAD_MAX_MEMORY_SIZE = PRODUCT_IMAGE_MAX_BYTES + 1 * 1024 * 1024
+FILE_UPLOAD_MAX_MEMORY_SIZE = DATA_UPLOAD_MAX_MEMORY_SIZE
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
