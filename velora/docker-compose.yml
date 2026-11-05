@@ -1,0 +1,20 @@
+
+services:
+  bookingdb:
+    image: postgres:17-alpine
+    container_name: velora_db
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: velora_user
+      POSTGRES_PASSWORD: Velo@38945
+      POSTGRES_DB: velora_booking_db
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - bookingdb_data:/var/lib/postgresql/data
+
+volumes:
+  bookingdb_data:
