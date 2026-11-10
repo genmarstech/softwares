@@ -44,8 +44,9 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'corsheaders',
     'rest_framework',
-    'rest_framework_simplejwt',
+    # 'rest_framework_simplejwt',
     'identity',
+    'business',
 ]
 
 MIDDLEWARE = [
@@ -110,6 +111,47 @@ REST_FRAMEWORK = {
     ),
 }
 
+# ==============================================================================
+# COOKIES & SESSION CONFIGURATIONS (Optimized for Local Cross-Origin Dev)
+# ==============================================================================
+SESSION_ENGINE = 'django.contrib.sessions.backends.db'
+SESSION_COOKIE_NAME = 'velora.sid'
+
+# Keep these False during local development over HTTP. 
+# If True, the browser will ONLY save/send the cookie over secure HTTPS connections.
+SESSION_COOKIE_SECURE = False
+CSRF_COOKIE_SECURE = False
+
+SESSION_COOKIE_HTTPONLY = True
+CSRF_COOKIE_HTTPONLY = False
+
+# Lax balance allows cross-origin resource requests across different local ports
+SESSION_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SAMESITE = 'Lax'
+
+SESSION_EXPIRE_AT_BROWSER_CLOSE = False
+SESSION_COOKIE_AGE = 60 * 60 * 24 * 7  # 7 days
+
+
+# ==============================================================================
+# CORS & CSRF SECURITY ORIGINS
+# ==============================================================================
+CORS_ALLOW_CREDENTIALS = True
+
+# Explicitly whitelist BOTH string forms to prevent browser cookie drops
+CORS_ALLOWED_ORIGINS = [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'http://localhost:8000',
+    'http://127.0.0.1:8000',
+]
+
+# CRITICAL: Missing array to let session mutations pass Django's middleware checks
+CSRF_TRUSTED_ORIGINS = [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+]
+
 
 
 # Password validation
@@ -150,10 +192,9 @@ STATIC_URL = 'static/'
 
 AUTH_USER_MODEL = 'identity.FirstUser'
 
-CORS_ALLOWED_ORIGINS = [
-    'http://localhost:5173',
-    'http://localhost:8000', 
-]
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+MEDIA_URL = '/media/'
 
 
 # Email
