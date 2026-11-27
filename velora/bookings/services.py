@@ -262,8 +262,10 @@ def find_or_create_customer(business, full_name, email='', phone_number='', chan
         customer.email, changed = email, True
     if phone_number and not customer.phone_number:
         customer.phone_number, changed = phone_number, True
+    if full_name.strip() and not customer.full_name:
+        customer.full_name, changed = full_name.strip(), True
     if changed:
-        customer.save(update_fields=['email', 'phone_number', 'updated_at'])
+        customer.save(update_fields=['full_name', 'email', 'phone_number', 'updated_at'])
     return customer
 
 

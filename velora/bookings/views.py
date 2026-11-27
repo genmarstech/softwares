@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta
 from django.db.models import Count, Max, Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from django.utils.dateparse import parse_date
+from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
@@ -171,7 +171,28 @@ class BookingViewSet(BusinessScopedMixin, mixins.ListModelMixin, mixins.Retrieve
             term = params['search'].strip()
             qs = qs.filter(Q(customer__full_name__icontains=term) | Q(customer__phone_number__icontains=term) |
                            Q(customer__email__icontains=term))
-        return qs.order_by('start')
+        if params.get('channel'):
+            qs = qs.filter(channel__in=params['channel'].split(','))
+        if params.get('booked_since'):
+            since = parse_datetime(params['booked_since'])
+            if since is None:
+                raise ValidationError({'booked_since': ['Use an ISO date-time.']})
+            qs = qs.filter(created_at__gte=since)
+        # ordering=start (default, appointment time), -start, or -created_at (newest bookings first)
+        ordering = params.get('ordering', 'start')
+        if ordering not in ('start', '-start', '-created_at'):
+            raise ValidationError({'ordering': ['Use start, -start or -created_at.']})
+        return qs.order_by(ordering, 'id')
+
+    def list(self, request, *args, **kwargs):
+        qs = self.filter_queryset(self.get_queryset())
+        if request.query_params.get('limit'):
+            try:
+                limit = max(1, min(200, int(request.query_params['limit'])))
+            except ValueError:
+                raise ValidationError({'limit': ['Use a number.']})
+            qs = qs[:limit]
+        return Response(self.get_serializer(qs, many=True).data)
 
     def update(self, request, *args, **kwargs):
         # Only notes can be edited directly.

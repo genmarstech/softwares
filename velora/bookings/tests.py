@@ -292,7 +292,7 @@ class PublicFlowTests(VeloraTestCase):
         self.book(at(self.monday, 10))
         response = APIClient().post(f'/bk/public/{self.business.id}/bookings/', {
             'service': self.service.id, 'staff': self.staff.id, 'start': at(self.monday, 10).isoformat(),
-            'full_name': 'Late Comer', 'email': 'late@example.com',
+            'full_name': 'Late Comer', 'email': 'late@example.com', 'phone_number': '+254744444444',
         }, format='json')
         self.assertEqual(response.status_code, 409)
 
@@ -447,3 +447,128 @@ class BookingLinkSlugTests(VeloraTestCase):
     def test_notification_link_uses_slug(self):
         from notifications.services import booking_page_link
         self.assertTrue(booking_page_link(self.business).endswith('/book/glow-salon'))
+
+
+class OnlineBookingVisibilityTests(VeloraTestCase):
+    """A customer books online; the owner must see the booking and how to reach them."""
+
+    def public_book(self, start, **extra):
+        payload = {
+            'service': self.service.id, 'start': start.isoformat(), 'full_name': 'Achieng Otieno',
+            'email': 'achieng@example.com', 'phone_number': '+254 722 000 111', 'source': 'instagram',
+        }
+        payload.update(extra)
+        with self.captureOnCommitCallbacks(execute=True):
+            return APIClient().post('/bk/public/glow-salon/bookings/', payload, format='json')
+
+    def test_contact_details_are_required_online(self):
+        day = next_weekday(0, weeks_ahead=2)
+        for missing in ('full_name', 'email', 'phone_number'):
+            response = self.public_book(at(day, 10), **{missing: ''})
+            self.assertEqual(response.status_code, 400, missing)
+            self.assertIn(missing, response.json())
+        self.assertEqual(self.public_book(at(day, 10), phone_number='call me').status_code, 400)
+
+    def test_owner_sees_far_future_online_booking_with_customer_details(self):
+        far = next_weekday(2, weeks_ahead=5)  # well past the default 7-day window
+        response = self.public_book(at(far, 11))
+        self.assertEqual(response.status_code, 201, response.content)
+
+        self.login()
+        newest = self.client.get('/bk/bookings/', {'business': self.business.id, 'ordering': '-created_at',
+                                                   'limit': 5}).json()
+        self.assertEqual(newest[0]['customer_name'], 'Achieng Otieno')
+        self.assertEqual(newest[0]['customer_phone'], '+254 722 000 111')
+        self.assertEqual(newest[0]['customer_email'], 'achieng@example.com')
+        self.assertEqual(newest[0]['channel'], 'online')
+
+        upcoming = self.client.get('/bk/bookings/', {'business': self.business.id,
+                                                     'date_from': timezone.now().date().isoformat()}).json()
+        self.assertIn(newest[0]['id'], [b['id'] for b in upcoming])
+        since = (timezone.now() - timedelta(minutes=5)).isoformat()
+        recent = self.client.get('/bk/bookings/', {'business': self.business.id, 'channel': 'online',
+                                                   'booked_since': since}).json()
+        self.assertEqual(len(recent), 1)
+
+        customers = self.client.get('/bk/customers/', {'business': self.business.id,
+                                                       'search': 'Achieng'}).json()
+        self.assertEqual(customers[0]['phone_number'], '+254 722 000 111')
+        self.assertEqual(customers[0]['first_channel'], 'instagram')
+
+        # The business inbox gets an email with the customer's contact details.
+        alert = Notification.objects.get(event=Notification.Event.STAFF_NEW_BOOKING, recipient_type='business')
+        self.assertEqual(alert.to_address, 'glow@example.com')
+        self.assertIn('+254 722 000 111', alert.body)
+        self.assertIn('achieng@example.com', alert.body)
+
+    def test_bad_list_params_are_rejected(self):
+        self.login()
+        for params in ({'ordering': 'price'}, {'booked_since': 'yesterday'}, {'limit': 'ten'}):
+            response = self.client.get('/bk/bookings/', {'business': self.business.id, **params})
+            self.assertEqual(response.status_code, 400, params)
+
+    def test_returning_customer_keeps_one_record(self):
+        day = next_weekday(1, weeks_ahead=2)
+        self.public_book(at(day, 10))
+        self.public_book(at(day, 13), email='ACHIENG@example.com')
+        self.assertEqual(Customer.objects.filter(business=self.business, full_name='Achieng Otieno').count(), 1)
+
+
+@override_settings(RESEND_API_KEY='re_test', RESEND_FROM_EMAIL='bookings@getvelora.co.ke',
+                   VELORA_NOTIFICATION_PROVIDERS={'email': 'resend', 'sms': 'console', 'whatsapp': 'console',
+                                                  'push': 'console'})
+class ResendProviderTests(VeloraTestCase):
+    def make_notification(self, **extra):
+        data = dict(business=self.business, event=Notification.Event.BOOKING_CONFIRMED, channel='email',
+                    to_address='jane@example.com', subject='Booking confirmed', body='See you soon',
+                    recipient_type='customer', recipient_name='Jane Doe')
+        data.update(extra)
+        return Notification.objects.create(**data)
+
+    def fake_response(self, body):
+        response = mock.MagicMock()
+        response.read.return_value = body
+        response.__enter__.return_value = response
+        return response
+
+    def test_sends_email_through_resend(self):
+        from notifications import services as notify
+        n = self.make_notification()
+        with mock.patch('urllib.request.urlopen', return_value=self.fake_response(b'{"id": "em_123"}')) as urlopen:
+            notify.send(n)
+        n.refresh_from_db()
+        self.assertEqual(n.status, Notification.Status.SENT)
+        self.assertEqual(n.provider, 'resend')
+        self.assertEqual(n.provider_message_id, 'em_123')
+        request = urlopen.call_args[0][0]
+        self.assertEqual(request.full_url, 'https://api.resend.com/emails')
+        self.assertEqual(request.get_header('Authorization'), 'Bearer re_test')
+        import json
+        payload = json.loads(request.data)
+        self.assertEqual(payload['from'], '"Glow Salon" <bookings@getvelora.co.ke>')
+        self.assertEqual(payload['to'], ['jane@example.com'])
+        self.assertEqual(payload['reply_to'], 'glow@example.com')
+        self.assertEqual(payload['text'], 'See you soon')
+
+    def test_resend_error_is_recorded_and_retried(self):
+        import io
+        import urllib.error
+        from notifications import services as notify
+        n = self.make_notification()
+        error = urllib.error.HTTPError('https://api.resend.com/emails', 403, 'Forbidden', {},
+                                       io.BytesIO(b'{"message": "domain not verified"}'))
+        with mock.patch('urllib.request.urlopen', side_effect=error):
+            notify.send(n)
+        n.refresh_from_db()
+        self.assertEqual(n.status, Notification.Status.QUEUED)
+        self.assertIn('domain not verified', n.error)
+        self.assertIsNotNone(n.next_attempt_at)
+
+    def test_sms_still_only_logged(self):
+        from notifications import services as notify
+        n = self.make_notification(channel='sms', to_address='+254711111111')
+        with mock.patch('urllib.request.urlopen') as urlopen:
+            notify.send(n)
+        urlopen.assert_not_called()
+        n.refresh_from_db()
+        self.assertEqual(n.provider, 'console')

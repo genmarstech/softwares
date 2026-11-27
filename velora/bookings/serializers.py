@@ -311,9 +311,11 @@ class PublicBookingInputSerializer(serializers.Serializer):
     service = serializers.IntegerField()
     staff = serializers.IntegerField(required=False, allow_null=True)
     start = serializers.DateTimeField()
+    # The business needs to reach every online customer, so name, phone and
+    # email are all required here (dashboard bookings stay flexible).
     full_name = serializers.CharField(max_length=255)
-    email = serializers.EmailField(required=False, allow_blank=True)
-    phone_number = serializers.CharField(required=False, allow_blank=True, max_length=20)
+    email = serializers.EmailField()
+    phone_number = serializers.CharField(max_length=20)
     intake_notes = serializers.CharField(required=False, allow_blank=True, max_length=2000)
     preferred_channel = serializers.ChoiceField(choices=Customer.Channel.choices, required=False,
                                                 allow_blank=True)
@@ -321,10 +323,18 @@ class PublicBookingInputSerializer(serializers.Serializer):
     session_key = serializers.CharField(required=False, allow_blank=True, max_length=64)
     source = serializers.CharField(required=False, allow_blank=True, max_length=40)
 
-    def validate(self, attrs):
-        if not attrs.get('email') and not attrs.get('phone_number'):
-            raise serializers.ValidationError({'email': ['Give an email address or a phone number.']})
-        return attrs
+    def validate_full_name(self, value):
+        value = ' '.join(value.split())
+        if len(value) < 2:
+            raise serializers.ValidationError('Please enter your name.')
+        return value
+
+    def validate_phone_number(self, value):
+        value = value.strip()
+        digits = ''.join(c for c in value if c.isdigit())
+        if not 9 <= len(digits) <= 15 or not all(c.isdigit() or c in '+ -()' for c in value):
+            raise serializers.ValidationError('Enter a valid phone number, e.g. +254 712 345 678.')
+        return value
 
 
 class PublicBookingSerializer(serializers.ModelSerializer):
