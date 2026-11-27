@@ -17,6 +17,9 @@ urlpatterns = [
     path('policy/', views.BookingPolicyView.as_view(), name='booking-policy'),
     path('availability/', views.OwnerAvailabilityView.as_view(), name='owner-availability'),
     path('analytics/', views.AnalyticsView.as_view(), name='analytics'),
+    path('overview/', views.OverviewView.as_view(), name='overview'),
+    path('overview/performance/', views.PerformanceView.as_view(), name='overview-performance'),
+    path('payments/', views.PaymentsView.as_view(), name='payments'),
     path('analytics/export/', views.AnalyticsExportView.as_view(), name='analytics-export'),
 
     # Public, customer-facing booking API. <business_id> is the business's
