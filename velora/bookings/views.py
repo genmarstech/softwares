@@ -625,3 +625,50 @@ class AnalyticsExportView(AnalyticsMixin, APIView):
             f'attachment; filename="velora-{kind}-{date_from.isoformat()}-to-{date_to.isoformat()}.csv"'
         )
         return response
+
+
+# ---------------------------------------------------------------------------
+# Overview page: stats, today's timeline, setup checklist, performance, payments
+# ---------------------------------------------------------------------------
+
+class OverviewView(BusinessScopedMixin, APIView):
+    """GET ?business=<id>&date=YYYY-MM-DD (defaults to today in the business's time zone)."""
+
+    def get(self, request):
+        from .overview import build_overview
+        business = self.get_business()
+        tz = services.business_tz(services.get_policy(business))
+        raw = request.query_params.get('date')
+        day = parse_day(raw) if raw else timezone.now().astimezone(tz).date()
+        return Response(build_overview(business, day))
+
+
+class PerformanceView(AnalyticsMixin, APIView):
+    """GET ?business=<id>&days=7|30|90, or &date_from=&date_to= for a custom range."""
+
+    def get(self, request):
+        from .overview import build_performance
+        days = request.query_params.get('days')
+        if days and not request.query_params.get('date_from'):
+            try:
+                days = int(days)
+            except ValueError:
+                raise ValidationError({'days': ['Must be a number of days.']})
+            if not 1 <= days <= 366:
+                raise ValidationError({'days': ['Pick between 1 and 366 days.']})
+            business = self.get_business()
+            tz = services.business_tz(services.get_policy(business))
+            date_to = timezone.now().astimezone(tz).date()
+            date_from = date_to - timedelta(days=days - 1)
+        else:
+            business, date_from, date_to, _ = self.report_args(request)
+        return Response(build_performance(business, date_from, date_to))
+
+
+class PaymentsView(AnalyticsMixin, APIView):
+    """GET ?business=<id>&date_from=&date_to= (defaults to the last 30 days)."""
+
+    def get(self, request):
+        from .overview import build_payments
+        business, date_from, date_to, _ = self.report_args(request)
+        return Response(build_payments(business, date_from, date_to))

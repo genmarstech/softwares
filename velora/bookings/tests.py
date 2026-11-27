@@ -591,3 +591,65 @@ class ResendProviderTests(VeloraTestCase):
         urlopen.assert_not_called()
         n.refresh_from_db()
         self.assertEqual(n.provider, 'console')
+
+
+class OverviewTests(VeloraTestCase):
+    def test_overview_shows_the_days_bookings_and_free_gaps(self):
+        self.book(at(self.monday, 10))
+        self.book(at(self.monday, 14), customer=Customer.objects.create(business=self.business, full_name='Ann'))
+        self.login()
+        response = self.client.get('/bk/overview/', {'business': self.business.id, 'date': self.monday.isoformat()})
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body['stats']['today']['value'], 2)
+        kinds = [(item['type'], item['start'][11:16]) for item in body['schedule']]
+        # 09:00 free, 10:00 booked, 11:00-14:00 free, 14:00 booked, 15:00-18:00 free (Nairobi times)
+        self.assertEqual(kinds, [('available', '09:00'), ('booking', '10:00'), ('available', '11:00'),
+                                 ('booking', '14:00'), ('available', '15:00')])
+        self.assertEqual(body['top_services'][0]['name'], 'Haircut')
+        self.assertEqual(body['top_services'][0]['bookings'], 2)
+
+    def test_setup_checklist_reflects_real_records(self):
+        self.login()
+        steps = {s['key']: s['done'] for s in self.client.get(
+            '/bk/overview/', {'business': self.business.id}).json()['setup']['steps']}
+        self.assertEqual(steps, {'profile': False, 'services': True, 'team': True, 'hours': False, 'share': False})
+        WorkingHours.objects.filter(business=self.business, weekday=5).update(end_time=time(14, 0))
+        setup = self.client.get('/bk/overview/', {'business': self.business.id}).json()['setup']
+        self.assertEqual(setup['completed'], 3)
+
+    def test_performance_compares_with_the_previous_period(self):
+        today = timezone.now().astimezone(NAIROBI).date()
+        Booking.objects.create(
+            business=self.business, customer=self.customer, service=self.service, staff=self.staff,
+            start=at(today, 9), end=at(today, 10), block_start=at(today, 9), block_end=at(today, 10),
+            status=Booking.Status.COMPLETED, price=Decimal('1500'),
+        )
+        before = today - timedelta(days=8)
+        Booking.objects.create(
+            business=self.business, customer=self.customer, service=self.service, staff=self.staff,
+            start=at(before, 9), end=at(before, 10), block_start=at(before, 9), block_end=at(before, 10),
+            status=Booking.Status.COMPLETED, price=Decimal('1000'),
+        )
+        self.login()
+        body = self.client.get('/bk/overview/performance/', {'business': self.business.id, 'days': 7}).json()
+        self.assertEqual(body['revenue']['value'], '1500.00')
+        self.assertEqual(body['revenue']['previous'], '1000.00')
+        self.assertEqual(body['revenue']['change_pct'], 50.0)
+        self.assertEqual(body['bookings']['value'], 1)
+        self.assertEqual(body['returning_clients']['value_pct'], 100.0)
+        self.assertEqual(len(body['series']), 7)
+
+    def test_payments_lists_recorded_payments(self):
+        booking = self.book(at(self.monday, 10))
+        services.record_payment(booking, amount=Decimal('400'), kind=Payment.Kind.DEPOSIT)
+        self.login()
+        body = self.client.get('/bk/payments/', {'business': self.business.id}).json()
+        self.assertEqual(body['summary']['collected'], '400.00')
+        self.assertEqual(body['summary']['outstanding'], '600.00')
+        self.assertEqual(body['payments'][0]['customer_name'], 'Jane Doe')
+
+    def test_other_owners_cannot_read_the_overview(self):
+        self.login(self.other)
+        for url in ('/bk/overview/', '/bk/overview/performance/', '/bk/payments/'):
+            self.assertEqual(self.client.get(url, {'business': self.business.id}).status_code, 404, url)
