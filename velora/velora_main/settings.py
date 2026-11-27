@@ -51,6 +51,8 @@ ALLOWED_HOSTS = env_list('ALLOWED_HOSTS', 'localhost,127.0.0.1')
 
 # Where customers open their booking links (manage / reschedule / cancel).
 FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173').rstrip('/')
+# Logo shown at the top of emails to the business. Defaults to the one the frontend serves.
+VELORA_EMAIL_LOGO_URL = os.getenv('VELORA_EMAIL_LOGO_URL', '')
 
 
 # Application definition

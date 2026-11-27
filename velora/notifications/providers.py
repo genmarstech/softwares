@@ -3,7 +3,8 @@
 - ``console``: logs the message and reports it as sent (development, and the
   fallback for every channel without a real provider).
 - ``resend``: sends email through https://resend.com. Needs ``RESEND_API_KEY``
-  and ``RESEND_FROM_EMAIL`` (a sender on a domain verified in Resend).
+  and ``RESEND_FROM_EMAIL`` (a sender on a domain verified in Resend). Each email has the
+  plain text and a branded HTML version (see ``notifications/emails.py``).
 
 SMS, WhatsApp and push still use ``console``. Providers are picked per channel
 in ``settings.VELORA_NOTIFICATION_PROVIDERS``.
@@ -48,6 +49,8 @@ class ResendProvider:
             raise ProviderError('Resend needs RESEND_API_KEY and RESEND_FROM_EMAIL.')
 
     def payload(self, notification):
+        from .emails import render_html
+
         business = notification.business
         sender = self.from_email
         if '<' not in sender and business.business_name:
@@ -59,6 +62,7 @@ class ResendProvider:
             'to': [notification.to_address],
             'subject': notification.subject or notification.get_event_display(),
             'text': notification.body,
+            'html': render_html(notification),
         }
         # Customers who reply reach the business, not the Velora sender address.
         if notification.recipient_type == 'customer' and business.business_email:

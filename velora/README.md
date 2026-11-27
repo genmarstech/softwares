@@ -98,6 +98,10 @@ are respected.
 
 - **Email** goes through [Resend](https://resend.com) when `RESEND_API_KEY` is set. Set
   `RESEND_FROM_EMAIL` to a sender on a domain verified in Resend (e.g. `bookings@getvelora.co.ke`).
+  Each email carries the plain text and a branded HTML version (`notifications/emails.py`,
+  template `notifications/templates/notifications/email.html`). Customer emails lead with the
+  business's name; emails to the business show the Velora logo from
+  `FRONTEND_URL/brand/email-logo.png` (override with `VELORA_EMAIL_LOGO_URL`).
   Emails show the business name as the sender name, and customer replies go to the business email.
   Without a key, emails are only logged.
 - **SMS, WhatsApp and push** use the console provider (log only) until their providers are chosen.

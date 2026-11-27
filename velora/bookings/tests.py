@@ -549,6 +549,25 @@ class ResendProviderTests(VeloraTestCase):
         self.assertEqual(payload['to'], ['jane@example.com'])
         self.assertEqual(payload['reply_to'], 'glow@example.com')
         self.assertEqual(payload['text'], 'See you soon')
+        self.assertIn('See you soon', payload['html'])
+        self.assertIn('Glow Salon', payload['html'])
+
+    def test_html_email_turns_links_into_buttons_and_escapes_text(self):
+        from notifications.emails import render_html
+        n = self.make_notification(body='Hi Jane, <b>see</b> you Friday.\nManage your booking: https://getvelora.co.ke/manage/abc\n— Glow Salon')
+        html = render_html(n)
+        self.assertIn('href="https://getvelora.co.ke/manage/abc"', html)
+        self.assertIn('>Manage your booking</a>', html)
+        self.assertIn('&lt;b&gt;see&lt;/b&gt;', html)
+        self.assertIn('Warm regards,<br>Glow Salon', html)
+
+    def test_html_email_for_the_business_shows_details_table_and_logo(self):
+        from notifications.emails import render_html
+        n = self.make_notification(recipient_type='business', body='New booking\nCustomer: Jane Doe\nPhone: +254711111111\nOpen in Velora: http://localhost:5173/dashboard/1/bookings?booking=1')
+        html = render_html(n)
+        self.assertIn('/brand/email-logo.png', html)
+        self.assertIn('>Customer</td>', html)
+        self.assertIn('>Open in Velora</a>', html)
 
     def test_resend_error_is_recorded_and_retried(self):
         import io
