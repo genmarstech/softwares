@@ -53,7 +53,8 @@ the owner's own rows, so ids from another business return 404.
 - `working-hours/`, `time-off/`, `locations/`, `resources/`: CRUD. Working hours with no `staff` are the
   business defaults; staff rows override them.
 - `availability/?business=&service=&date=&staff=`: open slots.
-- `bookings/`: list (filters `date_from`, `date_to`, `status`, `staff`, `service`, `customer`, `search`),
+- `bookings/`: list (filters `date_from`, `date_to`, `status`, `staff`, `service`, `customer`, `search`,
+  `channel`, `booked_since`; `ordering=start|-start|-created_at`; `limit`),
   create (phone, staff and walk-in bookings), and the actions `confirm/`, `cancel/`, `reschedule/`,
   `complete/`, `no-show/`, `check-in/`, `payments/`, `history/`, `notifications/`.
 - `customers/`, `waitlist/`, `notifications/` (delivery log, with `retry/`).
@@ -93,9 +94,18 @@ the numeric-id link keeps working.
 
 `notifications` stores every message with its status (queued, sent, delivered, failed, skipped,
 cancelled), attempts and errors. Failed sends retry after 5, 15 and 45 minutes. Opt-outs and quiet hours
-are respected. Every channel currently uses the **console provider**, which only logs the message.
-Real email, SMS, WhatsApp and push providers plug into `notifications/providers.py` and are chosen per
-channel with the `NOTIFY_*_PROVIDER` settings.
+are respected.
+
+- **Email** goes through [Resend](https://resend.com) when `RESEND_API_KEY` is set. Set
+  `RESEND_FROM_EMAIL` to a sender on a domain verified in Resend (e.g. `bookings@getvelora.co.ke`).
+  Emails show the business name as the sender name, and customer replies go to the business email.
+  Without a key, emails are only logged.
+- **SMS, WhatsApp and push** use the console provider (log only) until their providers are chosen.
+- Every new online booking emails the business inbox (and the assigned staff member) with the
+  customer's name, phone, email, service, time and notes.
+
+Providers live in `notifications/providers.py` and can be overridden per channel with the
+`NOTIFY_*_PROVIDER` settings.
 
 ## Payments
 

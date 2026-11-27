@@ -239,11 +239,14 @@ MAILERS = {
 
 
 # Notifications
-# Every channel uses the development "console" provider, which only writes the
-# message to the log and the notifications table. Real SMS / WhatsApp / email /
-# push providers get plugged in here once they are chosen.
+# Email goes through Resend when RESEND_API_KEY is set, otherwise it is only
+# logged. SMS / WhatsApp / push use the "console" provider (log only) until
+# their providers are chosen.
+RESEND_API_KEY = os.getenv('RESEND_API_KEY', '')
+# A sender on a domain verified in Resend, e.g. bookings@getvelora.co.ke
+RESEND_FROM_EMAIL = os.getenv('RESEND_FROM_EMAIL', '')
 VELORA_NOTIFICATION_PROVIDERS = {
-    'email': os.getenv('NOTIFY_EMAIL_PROVIDER', 'console'),
+    'email': os.getenv('NOTIFY_EMAIL_PROVIDER', 'resend' if RESEND_API_KEY else 'console'),
     'sms': os.getenv('NOTIFY_SMS_PROVIDER', 'console'),
     'whatsapp': os.getenv('NOTIFY_WHATSAPP_PROVIDER', 'console'),
     'push': os.getenv('NOTIFY_PUSH_PROVIDER', 'console'),

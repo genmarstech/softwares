@@ -163,6 +163,24 @@ def _summary(booking):
     return f'{booking.service.service_name}{staff} on {_when(booking)}'
 
 
+def _customer_card(booking):
+    """Who booked and how to reach them, for messages to the business."""
+    c = booking.customer
+    lines = [
+        f'Customer: {c.full_name}',
+        f'Phone: {c.phone_number or "not given"}',
+        f'Email: {c.email or "not given"}',
+        f'Service: {booking.service.service_name}' + (f' with {booking.staff.staff_name}' if booking.staff else ''),
+        f'When: {_when(booking)}',
+        f'Status: {booking.get_status_display()}',
+    ]
+    if c.first_channel:
+        lines.append(f'First booked via: {c.first_channel}')
+    lines.append(f'Notes: {booking.intake_notes or "none"}')
+    lines.append(f'Open in Velora: {settings.FRONTEND_URL}/dashboard/{booking.business_id}/bookings?booking={booking.id}')
+    return '\n'.join(lines)
+
+
 def cancel_scheduled(booking, events=(Notification.Event.REMINDER, Notification.Event.FOLLOW_UP)):
     Notification.objects.filter(
         booking=booking, event__in=events, status=Notification.Status.QUEUED,
@@ -269,8 +287,8 @@ def booking_created(booking):
                     f'Walk-in added: {booking.customer.full_name} for {_summary(booking)}.')
     else:
         notify_team(booking, Notification.Event.STAFF_NEW_BOOKING,
-                    f'New booking ({booking.get_status_display()}): {booking.customer.full_name} for '
-                    f'{_summary(booking)}.\nNotes: {booking.intake_notes or "none"}')
+                    f'New booking: {booking.customer.full_name} for {_summary(booking)}.\n\n'
+                    f'{_customer_card(booking)}')
     _send_now(booking)
 
 
