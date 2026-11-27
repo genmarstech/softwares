@@ -25,12 +25,32 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
+def env_bool(name, default=False):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def env_list(name, default=''):
+    return [item.strip() for item in os.getenv(name, default).split(',') if item.strip()]
+
+
 SECRET_KEY = os.getenv('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = env_bool('DEBUG', True)
 
-ALLOWED_HOSTS = []
+if not SECRET_KEY:
+    if DEBUG:
+        SECRET_KEY = 'django-insecure-local-development-only'
+    else:
+        raise RuntimeError('SECRET_KEY must be set when DEBUG is off.')
+
+ALLOWED_HOSTS = env_list('ALLOWED_HOSTS', 'localhost,127.0.0.1')
+
+# Where customers open their booking links (manage / reschedule / cancel).
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173').rstrip('/')
 
 
 # Application definition
@@ -47,6 +67,8 @@ INSTALLED_APPS = [
     # 'rest_framework_simplejwt',
     'identity',
     'business',
+    'bookings',
+    'notifications',
 ]
 
 MIDDLEWARE = [
@@ -92,6 +114,11 @@ WSGI_APPLICATION = 'velora_main.wsgi.application'
 
 DATABASES = {
     "default": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": BASE_DIR / "db.sqlite3",
+    }
+} if env_bool("USE_SQLITE") else {
+    "default": {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": os.getenv("DB_NAME"),
         "USER": os.getenv("DB_USER"),
@@ -109,6 +136,12 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
     ),
+    'DATETIME_FORMAT': 'iso-8601',
+    'DEFAULT_THROTTLE_RATES': {
+        # Public booking endpoints need no login, so cap how fast one client can use them.
+        'public_booking': '30/hour',
+        'public_track': '300/hour',
+    },
 }
 
 # ==============================================================================
@@ -119,8 +152,8 @@ SESSION_COOKIE_NAME = 'velora.sid'
 
 # Keep these False during local development over HTTP. 
 # If True, the browser will ONLY save/send the cookie over secure HTTPS connections.
-SESSION_COOKIE_SECURE = False
-CSRF_COOKIE_SECURE = False
+SESSION_COOKIE_SECURE = env_bool('SECURE_COOKIES', not DEBUG)
+CSRF_COOKIE_SECURE = SESSION_COOKIE_SECURE
 
 SESSION_COOKIE_HTTPONLY = True
 CSRF_COOKIE_HTTPONLY = False
@@ -139,18 +172,16 @@ SESSION_COOKIE_AGE = 60 * 60 * 24 * 7  # 7 days
 CORS_ALLOW_CREDENTIALS = True
 
 # Explicitly whitelist BOTH string forms to prevent browser cookie drops
-CORS_ALLOWED_ORIGINS = [
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-    'http://localhost:8000',
-    'http://127.0.0.1:8000',
-]
+CORS_ALLOWED_ORIGINS = env_list(
+    'CORS_ALLOWED_ORIGINS',
+    'http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,http://127.0.0.1:8000',
+)
 
-# CRITICAL: Missing array to let session mutations pass Django's middleware checks
-CSRF_TRUSTED_ORIGINS = [
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-]
+# Origins allowed to send POST/PATCH/DELETE with the session cookie.
+CSRF_TRUSTED_ORIGINS = env_list(
+    'CSRF_TRUSTED_ORIGINS',
+    'http://localhost:5173,http://127.0.0.1:5173',
+)
 
 
 
@@ -203,5 +234,27 @@ MEDIA_URL = '/media/'
 MAILERS = {
     'default': {
         'BACKEND': 'django.core.mail.backends.console.EmailBackend',
+    },
+}
+
+
+# Notifications
+# Every channel uses the development "console" provider, which only writes the
+# message to the log and the notifications table. Real SMS / WhatsApp / email /
+# push providers get plugged in here once they are chosen.
+VELORA_NOTIFICATION_PROVIDERS = {
+    'email': os.getenv('NOTIFY_EMAIL_PROVIDER', 'console'),
+    'sms': os.getenv('NOTIFY_SMS_PROVIDER', 'console'),
+    'whatsapp': os.getenv('NOTIFY_WHATSAPP_PROVIDER', 'console'),
+    'push': os.getenv('NOTIFY_PUSH_PROVIDER', 'console'),
+}
+VELORA_NOTIFICATION_MAX_ATTEMPTS = 3
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {'console': {'class': 'logging.StreamHandler'}},
+    'loggers': {
+        'velora.notifications': {'handlers': ['console'], 'level': 'INFO'},
     },
 }
