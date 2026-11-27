@@ -62,10 +62,21 @@ the owner's own rows, so ids from another business return 404.
 
 ### Public API (`bk/public/`, no login)
 
-- `<business_id>/`: profile, services, staff names, policy summary.
-- `<business_id>/availability/?service=&date=&staff=` and `<business_id>/available-days/`.
-- `<business_id>/bookings/` POST: book a slot.
-- `<business_id>/track/` POST: booking funnel step; `<business_id>/waitlist/` POST.
+`<business>` is the business's booking-link slug (`glow-salon`) or, for links shared before slugs
+existed, its numeric id. Customers book at `FRONTEND_URL/book/<slug>`, e.g.
+`https://getvelora.co.ke/book/glow-salon`.
+
+Slugs are generated from the business name when a business is created (`glow-salon`, then
+`glow-salon-2` for a second business with the same name) and existing businesses get one from
+migration `business/0007`. Owners can change theirs with `PATCH bn/business/<id>/ {"slug": ...}`:
+lowercase letters, numbers and hyphens, at least 3 characters, not all digits, not taken and not a
+reserved word such as `dashboard` (see `business/slugs.py`). Changing it breaks the old slug link, but
+the numeric-id link keeps working.
+
+- `<business>/`: profile, services, staff names, policy summary.
+- `<business>/availability/?service=&date=&staff=` and `<business>/available-days/`.
+- `<business>/bookings/` POST: book a slot.
+- `<business>/track/` POST: booking funnel step; `<business>/waitlist/` POST.
 - `manage/<token>/` GET, plus `cancel/`, `reschedule/`, `confirm/`, `preferences/` POST: customer
   self-service through the private link sent in every message.
 

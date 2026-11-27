@@ -19,15 +19,8 @@ urlpatterns = [
     path('analytics/', views.AnalyticsView.as_view(), name='analytics'),
     path('analytics/export/', views.AnalyticsExportView.as_view(), name='analytics-export'),
 
-    # Public, customer-facing booking API
-    path('public/<int:business_id>/', views.PublicBusinessView.as_view(), name='public-business'),
-    path('public/<int:business_id>/availability/', views.PublicAvailabilityView.as_view(),
-         name='public-availability'),
-    path('public/<int:business_id>/available-days/', views.PublicAvailableDaysView.as_view(),
-         name='public-available-days'),
-    path('public/<int:business_id>/bookings/', views.PublicBookingCreateView.as_view(), name='public-book'),
-    path('public/<int:business_id>/track/', views.PublicTrackView.as_view(), name='public-track'),
-    path('public/<int:business_id>/waitlist/', views.PublicWaitlistView.as_view(), name='public-waitlist'),
+    # Public, customer-facing booking API. <business_id> is the business's
+    # booking-link slug (glow-salon) or, for older links, its numeric id.
     path('public/manage/<uuid:token>/', views.PublicManageView.as_view(), name='public-manage'),
     path('public/manage/<uuid:token>/cancel/', views.PublicCancelView.as_view(), name='public-cancel'),
     path('public/manage/<uuid:token>/reschedule/', views.PublicRescheduleView.as_view(),
@@ -35,4 +28,12 @@ urlpatterns = [
     path('public/manage/<uuid:token>/confirm/', views.PublicConfirmView.as_view(), name='public-confirm'),
     path('public/manage/<uuid:token>/preferences/', views.PublicPreferencesView.as_view(),
          name='public-preferences'),
+    path('public/<str:business_id>/', views.PublicBusinessView.as_view(), name='public-business'),
+    path('public/<str:business_id>/availability/', views.PublicAvailabilityView.as_view(),
+         name='public-availability'),
+    path('public/<str:business_id>/available-days/', views.PublicAvailableDaysView.as_view(),
+         name='public-available-days'),
+    path('public/<str:business_id>/bookings/', views.PublicBookingCreateView.as_view(), name='public-book'),
+    path('public/<str:business_id>/track/', views.PublicTrackView.as_view(), name='public-track'),
+    path('public/<str:business_id>/waitlist/', views.PublicWaitlistView.as_view(), name='public-waitlist'),
 ] + router.urls

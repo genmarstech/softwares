@@ -325,8 +325,12 @@ class PublicAPIView(APIView):
     permission_classes = [AllowAny]
 
 
-def public_business(business_id):
-    return get_object_or_404(Business, pk=business_id)
+def public_business(business_ref):
+    """Find a business by its booking-link slug, or by id for older links."""
+    ref = str(business_ref).strip().lower()
+    if ref.isdigit():
+        return get_object_or_404(Business, pk=int(ref))
+    return get_object_or_404(Business, slug=ref)
 
 
 class PublicBusinessView(PublicAPIView):
@@ -338,6 +342,7 @@ class PublicBusinessView(PublicAPIView):
         logo = request.build_absolute_uri(business.business_logo.url) if business.business_logo else None
         return Response({
             'id': business.id,
+            'slug': business.slug,
             'business_name': business.business_name,
             'business_description': business.business_description,
             'business_category': business.business_category,
