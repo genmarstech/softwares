@@ -5,10 +5,11 @@ services:
     container_name: velora_db
     restart: unless-stopped
 
+    # Values come from velora/.env (see .env.example), so no password is committed.
     environment:
-      POSTGRES_USER: velora_user
-      POSTGRES_PASSWORD: Velo@38945
-      POSTGRES_DB: velora_booking_db
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
 
     ports:
       - "5432:5432"

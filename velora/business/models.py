@@ -11,15 +11,19 @@ class Business(models.Model):
         BARBER_SHOP_CATEGORY = 'BSC', 'Barbershop Category'
         SPA_CATEGORY = 'SP', 'Spa Category'
         BEAUTY_CLINIC_CATEGORY = 'BCC', 'Beauty Clinic Category'
-        SALON_PROFESSIONAL_CATEGORY = 'SPC', 'Salon Professional Category'
+        SALON_PROFESSIONAL_CATEGORY = 'SPC', 'Beauty Professionals Category'
 
     business_owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     business_name = models.CharField(max_length=255)
     business_description = models.TextField()
     business_category = models.CharField(max_length=3, choices=BusinessChoices.choices, default=BusinessChoices.SALON_CATEGORY)
-    whatsapp_number = models.CharField(max_length=10)
+    whatsapp_number = models.CharField(max_length=20)
     business_email = models.EmailField()
     business_logo = models.ImageField(upload_to='business_logos/%y/%m/%d/', blank=True, null=True)
+    number_of_service_users = models.PositiveIntegerField(
+        default=1,
+        help_text='How many people deliver services at this business',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -46,6 +50,21 @@ class Service(models.Model):
   price = models.DecimalField(max_digits=10, decimal_places=2)
   duration_minutes = models.PositiveIntegerField(
       help_text='Duration of the service in minutes'
+  )
+  buffer_before_minutes = models.PositiveIntegerField(
+      default=0, help_text='Preparation time blocked before the appointment'
+  )
+  buffer_after_minutes = models.PositiveIntegerField(
+      default=0, help_text='Cleanup time blocked after the appointment'
+  )
+  deposit_amount = models.DecimalField(
+      max_digits=10, decimal_places=2, null=True, blank=True,
+      help_text='Fixed deposit for this service. Empty uses the business deposit percentage.',
+  )
+  resource = models.ForeignKey(
+      'bookings.Resource', on_delete=models.SET_NULL, null=True, blank=True,
+      related_name='services',
+      help_text='Room or equipment this service needs',
   )
   is_available = models.BooleanField(default=True)
   created_at = models.DateTimeField(auto_now_add=True)
@@ -80,6 +99,12 @@ class BusinessStaff(models.Model):
     staff_name = models.CharField(max_length=100)
     staff_email = models.EmailField()
     id_number = models.CharField(max_length=8)
+    staff_phone = models.CharField(max_length=20, blank=True, default='')
+
+    # Services this staff member can perform. Empty means they can perform every service.
+    skills = models.ManyToManyField(
+        'Service', blank=True, related_name='skilled_staff'
+    )
 
     is_available = models.BooleanField(default=True)
 
