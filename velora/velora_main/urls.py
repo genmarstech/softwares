@@ -19,6 +19,10 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 
+# Branded titles for the Django admin
+admin.site.site_header = 'Velora admin'
+admin.site.site_title = 'Velora admin'
+admin.site.index_title = 'Bookings and businesses'
 
 urlpatterns = [
     path('admin/', admin.site.urls),

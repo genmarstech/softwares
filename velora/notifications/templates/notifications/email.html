@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>{{ subject }}</title>
+</head>
+{% comment %}
+  Velora email layout. Table-based with inline styles so it holds up in Gmail, Outlook and phone mail apps.
+  Colours: cream #f8f7f2, deep green #3e5948, sage #627c69, ink #202b26.
+{% endcomment %}
+<body style="margin:0;padding:0;background:#f8f7f2;-webkit-text-size-adjust:100%;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#f8f7f2;">{{ subject }}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f8f7f2;">
+  <tr>
+    <td align="center" style="padding:32px 16px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;">
+        <tr>
+          <td style="padding:0 8px 20px;font-family:Georgia,'Times New Roman',serif;">
+            {% if for_customer and business_name %}
+              <div style="font-size:24px;line-height:1.2;color:#202b26;">{{ business_name }}</div>
+            {% else %}
+              <img src="{{ logo_url }}" width="132" height="32" alt="Velora" style="display:block;border:0;outline:none;">
+            {% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td style="background:#ffffff;border:1px solid #e8e8df;border-radius:14px;padding:32px 28px;font-family:'DM Sans',-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.65;color:#3b4740;">
+            <h1 style="margin:0 0 18px;font-family:Georgia,'Times New Roman',serif;font-size:24px;line-height:1.25;font-weight:normal;color:#202b26;">{{ heading }}</h1>
+            {% for kind, data in blocks %}
+              {% if kind == 'text' %}
+                <p style="margin:0 0 14px;">{{ data|safe }}</p>
+              {% else %}
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:6px 0 18px;background:#f8f7f2;border-radius:10px;">
+                  {% for row in data %}
+                  <tr>
+                    <td style="padding:9px 14px;font-size:13px;color:#858b83;width:38%;vertical-align:top;{% if not forloop.first %}border-top:1px solid #ecece4;{% endif %}">{{ row.label }}</td>
+                    <td style="padding:9px 14px;font-size:14px;color:#202b26;vertical-align:top;{% if not forloop.first %}border-top:1px solid #ecece4;{% endif %}">{{ row.value|urlize }}</td>
+                  </tr>
+                  {% endfor %}
+                </table>
+              {% endif %}
+            {% endfor %}
+            {% for button in buttons %}
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 6px;">
+                <tr>
+                  <td style="border-radius:10px;background:#3e5948;">
+                    <a href="{{ button.url }}" style="display:inline-block;padding:13px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:10px;">{{ button.label }}</a>
+                  </td>
+                </tr>
+              </table>
+            {% endfor %}
+            {% if signoff %}
+              <p style="margin:22px 0 0;color:#202b26;">Warm regards,<br>{{ signoff }}</p>
+            {% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td align="center" style="padding:22px 8px 0;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:12px;line-height:1.6;color:#9aa094;">
+            {% if for_customer %}
+              Sent for {{ business_name }} by <a href="{{ site_url }}" style="color:#627c69;text-decoration:none;font-weight:600;">Velora</a>.{% if can_reply %} Reply to this email to reach {{ business_name }}.{% endif %}
+            {% else %}
+              <a href="{{ site_url }}" style="color:#627c69;text-decoration:none;font-weight:600;">Velora</a> · Bookings &amp; appointments
+            {% endif %}
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>
