@@ -196,6 +196,8 @@ class BookingEngineTests(VeloraTestCase):
             self.book(at(self.monday, 7))
 
     def test_lifecycle_is_logged(self):
+        self.policy.auto_confirm = True
+        self.policy.save()
         booking = self.book(at(self.monday, 10))
         self.assertEqual(booking.status, Booking.Status.CONFIRMED)
         with self.captureOnCommitCallbacks(execute=True):
@@ -315,6 +317,8 @@ class PublicFlowTests(VeloraTestCase):
 
 class NotificationTests(VeloraTestCase):
     def test_confirmation_staff_alert_and_reminders(self):
+        self.policy.auto_confirm = True
+        self.policy.save()
         booking = self.book(at(self.monday, 10))
         customer_msgs = Notification.objects.filter(booking=booking, recipient_type='customer')
         self.assertEqual(set(customer_msgs.filter(event='booking_confirmed').values_list('channel', flat=True)),

@@ -32,6 +32,7 @@ Two commands should be scheduled (cron or a systemd timer):
 | `idn/api/auth/` | `identity` | `csrf/`, `register/`, `login/`, `logout/`, `me/` (session cookie auth) |
 | `bn/` | `business` | `business/`, `services/`, `staff/` |
 | `bk/` | `bookings` | Scheduling, bookings, customers, notifications log, analytics, public booking API |
+| `cu/` | `customers` | Customer accounts on booking links: `session/`, `register/`, `login/`, `logout/`, `join/`, `bookings/` |
 
 ### CSRF
 
@@ -115,3 +116,20 @@ Providers live in `notifications/providers.py` and can be overridden per channel
 
 Deposits, balances, cancellation fees and refunds are recorded manually against a booking. A held booking
 is confirmed when its deposit is covered. No payment gateway is connected yet.
+
+### Customer accounts (`cu/`)
+
+Customers sign up or sign in on a business's link (`/book/<slug>`) with their phone number and a password.
+The phone number is stored in E.164 (`VELORA_DEFAULT_COUNTRY_CODE`, default `254`, turns `0712...` into
+`+254712...`) and is unique, so later WhatsApp and Telegram bots can find a customer by number. One account
+works at every business; joining a business creates (or links) that business's `Customer` record.
+
+- `session/?business=<slug>` GET: who is signed in and whether they joined that business. PATCH: name/email.
+- `register/`, `login/` POST (`business`, `phone_number`, `password`, plus `full_name`, `email` to register):
+  sign in and join the business. Throttled per IP (`customer_auth`).
+- `join/`, `logout/` POST. `bookings/?business=<slug>` GET: upcoming and past bookings with `rebook` info,
+  plus `favourites` for one-tap "book again".
+- Signed-in customers post to `bk/public/<slug>/bookings/` without name/phone/email.
+- The customer is kept in the session separately from the business-owner login. Writes need `X-CSRFToken`.
+- Online bookings now wait as **pending** by default (`auto_confirm` defaults to off for new businesses).
+- Setup checklist: "Share your link with 5 customers" counts customers who joined or booked online.

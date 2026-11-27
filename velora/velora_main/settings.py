@@ -50,6 +50,9 @@ if not SECRET_KEY:
 ALLOWED_HOSTS = env_list('ALLOWED_HOSTS', 'localhost,127.0.0.1')
 
 # Where customers open their booking links (manage / reschedule / cancel).
+# Country code added to local phone numbers (0712...) so customers have one identity.
+VELORA_DEFAULT_COUNTRY_CODE = os.getenv('VELORA_DEFAULT_COUNTRY_CODE', '254')
+
 FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173').rstrip('/')
 # Logo shown at the top of emails to the business. Defaults to the one the frontend serves.
 VELORA_EMAIL_LOGO_URL = os.getenv('VELORA_EMAIL_LOGO_URL', '')
@@ -71,6 +74,7 @@ INSTALLED_APPS = [
     'business',
     'bookings',
     'notifications',
+    'customers',
 ]
 
 MIDDLEWARE = [
@@ -143,6 +147,8 @@ REST_FRAMEWORK = {
         # Public booking endpoints need no login, so cap how fast one client can use them.
         'public_booking': '30/hour',
         'public_track': '300/hour',
+        # Customer sign-up and sign-in on booking links (per IP).
+        'customer_auth': '20/hour',
     },
 }
 

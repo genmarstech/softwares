@@ -135,13 +135,17 @@ class CustomerSerializer(serializers.ModelSerializer):
     total_bookings = serializers.IntegerField(read_only=True)
     last_visit = serializers.DateTimeField(read_only=True)
     no_shows = serializers.IntegerField(read_only=True)
+    has_account = serializers.SerializerMethodField()
 
     class Meta:
         model = Customer
         fields = ['id', 'business', 'full_name', 'email', 'phone_number', 'notes', 'preferred_channel',
                   'opt_out_email', 'opt_out_sms', 'opt_out_whatsapp', 'opt_out_push', 'first_channel',
-                  'total_bookings', 'last_visit', 'no_shows', 'created_at', 'updated_at']
-        read_only_fields = ['first_channel', 'created_at', 'updated_at']
+                  'total_bookings', 'last_visit', 'no_shows', 'has_account', 'joined_at', 'created_at', 'updated_at']
+        read_only_fields = ['first_channel', 'joined_at', 'created_at', 'updated_at']
+
+    def get_has_account(self, obj):
+        return obj.account_id is not None
 
     def validate(self, attrs):
         email = attrs.get('email', getattr(self.instance, 'email', ''))
@@ -323,14 +327,26 @@ class PublicBookingInputSerializer(serializers.Serializer):
     session_key = serializers.CharField(required=False, allow_blank=True, max_length=64)
     source = serializers.CharField(required=False, allow_blank=True, max_length=40)
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.context.get('account') is not None:
+            # Signed-in customers already gave their name and phone when they joined.
+            for name in ('full_name', 'email', 'phone_number'):
+                self.fields[name].required = False
+                self.fields[name].allow_blank = True
+
     def validate_full_name(self, value):
         value = ' '.join(value.split())
+        if self.context.get('account') is not None and not value:
+            return value
         if len(value) < 2:
             raise serializers.ValidationError('Please enter your name.')
         return value
 
     def validate_phone_number(self, value):
         value = value.strip()
+        if self.context.get('account') is not None and not value:
+            return value
         digits = ''.join(c for c in value if c.isdigit())
         if not 9 <= len(digits) <= 15 or not all(c.isdigit() or c in '+ -()' for c in value):
             raise serializers.ValidationError('Enter a valid phone number, e.g. +254 712 345 678.')
