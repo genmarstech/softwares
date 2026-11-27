@@ -1,4 +1,6 @@
-from rest_framework import viewsets
+from django.db.models import ProtectedError
+from rest_framework import status, viewsets
+from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 
 from .mixins import BusinessScopedMixin
@@ -32,6 +34,15 @@ class ServicesViewSet(BusinessScopedMixin, viewsets.ModelViewSet):
 
     queryset = Service.objects.select_related('business').order_by('service_name')
     serializer_class = ServiceSerializer
+
+    def destroy(self, request, *args, **kwargs):
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError:
+            return Response(
+                {'detail': 'This service has bookings, so it cannot be deleted. Hide it instead.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
 
 class BusinessStaffViewSet(BusinessScopedMixin, viewsets.ModelViewSet):
