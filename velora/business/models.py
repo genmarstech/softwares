@@ -15,6 +15,8 @@ class Business(models.Model):
 
     business_owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     business_name = models.CharField(max_length=255)
+    # Public booking link: /book/<slug>, e.g. /book/glow-salon
+    slug = models.SlugField(max_length=80, unique=True)
     business_description = models.TextField()
     business_category = models.CharField(max_length=3, choices=BusinessChoices.choices, default=BusinessChoices.SALON_CATEGORY)
     whatsapp_number = models.CharField(max_length=20)
@@ -37,6 +39,12 @@ class Business(models.Model):
             )
         ]
     
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            from .slugs import unique_business_slug
+            self.slug = unique_business_slug(self.business_name, exclude_pk=self.pk)
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return f"Business {self.business_name} under {self.business_category}"
 

@@ -338,6 +338,7 @@ class PublicBookingSerializer(serializers.ModelSerializer):
     staff_id = serializers.IntegerField(source='staff.id', default=None)
     customer_name = serializers.CharField(source='customer.full_name')
     business_id = serializers.IntegerField(source='business.id')
+    business_slug = serializers.CharField(source='business.slug')
     business_name = serializers.CharField(source='business.business_name')
     balance_due = serializers.DecimalField(max_digits=10, decimal_places=2)
     deposit_paid = serializers.BooleanField()
@@ -345,6 +346,6 @@ class PublicBookingSerializer(serializers.ModelSerializer):
     class Meta:
         model = Booking
         fields = ['manage_token', 'status', 'status_label', 'service_id', 'service_name', 'duration_minutes',
-                  'staff_id', 'staff_name', 'customer_name', 'business_id', 'business_name', 'start', 'end',
+                  'staff_id', 'staff_name', 'customer_name', 'business_id', 'business_slug', 'business_name', 'start', 'end',
                   'price', 'deposit_amount', 'deposit_paid', 'balance_due', 'cancellation_fee',
                   'hold_expires_at', 'reschedule_count', 'intake_notes']

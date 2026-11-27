@@ -387,3 +387,63 @@ class AnalyticsTests(VeloraTestCase):
         self.assertIn('Jane Doe', csv_response.content.decode())
         summary = self.client.get('/bk/analytics/export/', {**params, 'kind': 'summary'}).content.decode()
         self.assertIn('no-show rate %', summary)
+
+
+class BookingLinkSlugTests(VeloraTestCase):
+    def make_business(self, name):
+        n = Business.objects.count()
+        owner = User.objects.create_user(f'slug{n}@example.com', 'pass-12345', full_name='Slug Owner')
+        return Business.objects.create(
+            business_owner=owner, business_name=name, business_description='x',
+            whatsapp_number='+254700000009', business_email='x@example.com',
+        )
+
+    def test_slug_comes_from_name_and_is_unique(self):
+        self.assertEqual(self.business.slug, 'glow-salon')
+        self.assertEqual(self.make_business('Glow Salon').slug, 'glow-salon-2')
+        self.assertEqual(self.make_business('Glow  Salon!').slug, 'glow-salon-3')
+        self.assertEqual(self.make_business('Book').slug, 'book-studio')
+        self.assertEqual(self.make_business('123').slug, '123-studio')
+
+    def test_backfill_gives_existing_businesses_unique_slugs(self):
+        from importlib import import_module
+        from django.apps import apps
+        Business.objects.filter(pk=self.other_business.pk).update(slug='')
+        self.make_business('Other Spa')  # created after, so it already holds other-spa
+        migration = import_module('business.migrations.0007_business_slug')
+        migration.backfill_slugs(apps, None)
+        slugs = list(Business.objects.values_list('slug', flat=True))
+        self.assertEqual(len(slugs), len(set(slugs)))
+        self.assertIn('glow-salon', slugs)
+        self.assertIn('other-spa-2', slugs)
+
+    def test_public_api_works_by_slug_and_by_old_id(self):
+        by_slug = self.client.get('/bk/public/glow-salon/')
+        self.assertEqual(by_slug.status_code, 200)
+        self.assertEqual(by_slug.json()['slug'], 'glow-salon')
+        by_id = self.client.get(f'/bk/public/{self.business.id}/')
+        self.assertEqual(by_id.json()['slug'], 'glow-salon')
+        self.assertEqual(self.client.get('/bk/public/GLOW-SALON/').status_code, 200)
+        self.assertEqual(self.client.get('/bk/public/no-such-place/').status_code, 404)
+        day = next_weekday(0).isoformat()
+        avail = self.client.get('/bk/public/glow-salon/availability/', {'service': self.service.id, 'date': day})
+        self.assertEqual(avail.status_code, 200)
+
+    def test_owner_can_edit_slug_with_validation(self):
+        self.login()
+        url = f'/bn/business/{self.business.id}/'
+        ok = self.client.patch(url, {'slug': 'Glow-Westlands'}, format='json')
+        self.assertEqual(ok.status_code, 200, ok.content)
+        self.assertEqual(ok.json()['slug'], 'glow-westlands')
+        for bad in ('other-spa', 'dashboard', '12345', 'a', 'has space', '-dash'):
+            response = self.client.patch(url, {'slug': bad}, format='json')
+            self.assertEqual(response.status_code, 400, bad)
+            self.assertIn('slug', response.json())
+        # Saving other fields keeps the slug.
+        self.client.patch(url, {'business_description': 'New'}, format='json')
+        self.business.refresh_from_db()
+        self.assertEqual(self.business.slug, 'glow-westlands')
+
+    def test_notification_link_uses_slug(self):
+        from notifications.services import booking_page_link
+        self.assertTrue(booking_page_link(self.business).endswith('/book/glow-salon'))

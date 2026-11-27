@@ -40,7 +40,7 @@ def manage_link(booking):
 
 
 def booking_page_link(business):
-    return f'{settings.FRONTEND_URL}/book/{business.id}'
+    return f'{settings.FRONTEND_URL}/book/{business.slug or business.id}'
 
 
 def _when(booking, start=None):

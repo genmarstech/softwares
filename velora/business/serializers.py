@@ -24,6 +24,7 @@ class BusinessSerializers(serializers.ModelSerializer):
         fields = [
             "id",
             "business_name",
+            "slug",
             "business_description",
             "business_category",
             "business_category_label",
@@ -35,6 +36,23 @@ class BusinessSerializers(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
+        extra_kwargs = {"slug": {"required": False, "validators": []}}
+
+    def validate_slug(self, value):
+        from .slugs import validate_slug_format
+
+        value = (value or "").strip().lower()
+        if not value:
+            return value
+        error = validate_slug_format(value)
+        if error:
+            raise serializers.ValidationError(error)
+        clash = Business.objects.filter(slug=value)
+        if self.instance:
+            clash = clash.exclude(pk=self.instance.pk)
+        if clash.exists():
+            raise serializers.ValidationError("This link is already taken. Try adding your area, e.g. glow-salon-westlands.")
+        return value
 
     def validate(self, attrs):
         # The model has a unique constraint on (owner, name, category); the owner is
