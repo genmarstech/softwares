@@ -171,6 +171,10 @@ CSRF_COOKIE_HTTPONLY = False
 SESSION_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_SAMESITE = 'Lax'
 
+# The site (getvelora.co.ke) and the API (api.getvelora.co.ke) are the same site, so
+# Lax cookies still ride along on the dashboard's requests. A Vercel preview URL
+# (*.vercel.app) is a different site and cannot sign in; that is expected.
+
 SESSION_EXPIRE_AT_BROWSER_CLOSE = False
 SESSION_COOKIE_AGE = 60 * 60 * 24 * 7  # 7 days
 
@@ -192,6 +196,22 @@ CSRF_TRUSTED_ORIGINS = env_list(
     'http://localhost:5173,http://127.0.0.1:5173',
 )
 
+
+
+# ==============================================================================
+# BEHIND CLOUDFLARE TUNNEL
+# ==============================================================================
+# Production traffic is browser -> Cloudflare (HTTPS) -> cloudflared -> nginx ->
+# gunicorn, all plain HTTP after Cloudflare. nginx overwrites X-Forwarded-Proto
+# and X-Forwarded-For (with CF-Connecting-IP), so they can be trusted here; without
+# this, Django thinks every request is http, builds http:// logo URLs and rejects
+# the secure CSRF checks.
+if env_bool('BEHIND_PROXY'):
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    # DRF throttles per client IP; nginx puts exactly one trusted address there.
+    REST_FRAMEWORK['NUM_PROXIES'] = 1
+    # Cloudflare already redirects http to https at the edge.
+    SECURE_HSTS_SECONDS = int(os.getenv('SECURE_HSTS_SECONDS', '0'))
 
 
 # Password validation
@@ -229,10 +249,12 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
 STATIC_URL = 'static/'
+# collectstatic writes here; nginx serves it in the containers (see docker/nginx.conf).
+STATIC_ROOT = os.getenv('STATIC_ROOT', str(BASE_DIR / 'staticfiles'))
 
 AUTH_USER_MODEL = 'identity.FirstUser'
 
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+MEDIA_ROOT = os.getenv('MEDIA_ROOT', os.path.join(BASE_DIR, 'media'))
 
 MEDIA_URL = '/media/'
 
