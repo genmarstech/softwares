@@ -33,6 +33,7 @@ Two commands should be scheduled (cron or a systemd timer):
 | `bn/` | `business` | `business/`, `services/`, `staff/` |
 | `bk/` | `bookings` | Scheduling, bookings, customers, notifications log, analytics, public booking API |
 | `cu/` | `customers` | Customer accounts on booking links: `session/`, `register/`, `login/`, `logout/`, `join/`, `bookings/` |
+| `bots/` | `bots` | Telegram and WhatsApp bots: `telegram/webhook/`, `whatsapp/webhook/` (Meta Callback URL), `settings/?business=` (dashboard Channels page). Setup: [docs/BOTS.md](docs/BOTS.md) |
 
 ### CSRF
 
