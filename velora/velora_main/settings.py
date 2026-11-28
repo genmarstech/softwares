@@ -255,7 +255,7 @@ RESEND_API_KEY = os.getenv('RESEND_API_KEY', '')
 # A sender on a domain verified in Resend, e.g. bookings@getvelora.co.ke
 RESEND_FROM_EMAIL = os.getenv('RESEND_FROM_EMAIL', '')
 # The address every Velora email is sent from (customers and businesses), e.g.
-# info@genmarstech.com. Must be on a domain verified in Resend. Falls back to
+# info@genmars.co.ke. Must be on a domain verified in Resend. Falls back to
 # RESEND_FROM_EMAIL.
 VELORA_EMAIL_FROM = os.getenv('VELORA_EMAIL_FROM', '') or RESEND_FROM_EMAIL
 # Name shown in the inbox. Customer emails read "<Business> via Velora".
