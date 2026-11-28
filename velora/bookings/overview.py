@@ -12,6 +12,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from business.models import BusinessStaff, Service
+from customers.services import SETUP_SHARE_TARGET, reached_customers
 from notifications.models import Notification
 
 from .models import Booking, FunnelEvent, Payment, TimeOff, WorkingHours
@@ -130,10 +131,10 @@ def setup_steps(business):
     has_services = Service.objects.filter(business=business, is_available=True).exists()
     has_team = BusinessStaff.objects.filter(business=business).exists()
     has_hours = _hours_customised(business)
-    shared = (
-        FunnelEvent.objects.filter(business=business, step=FunnelEvent.Step.PAGE_VIEW).exists()
-        or Booking.objects.filter(business=business, channel=Booking.Channel.ONLINE).exists()
-    )
+    # Customers who joined or booked through the link (see customers.services.reached_customers).
+    target = SETUP_SHARE_TARGET
+    reached = reached_customers(business).count()
+    shared = reached >= target
     steps = [
         {'key': 'profile', 'label': 'Business profile', 'done': has_profile, 'link': 'settings',
          'text': 'Your business information is ready.' if has_profile
@@ -145,9 +146,10 @@ def setup_steps(business):
          'text': 'Your staff members are registered.' if has_team else 'Register your staff members.'},
         {'key': 'hours', 'label': 'Set your availability', 'done': has_hours, 'link': 'schedule',
          'text': 'Your working hours are set.' if has_hours else 'Configure your working hours.'},
-        {'key': 'share', 'label': 'Share your booking page', 'done': shared, 'link': 'share',
-         'text': 'Customers are finding your booking page.' if shared
-         else 'Send your link so customers can book online.'},
+        {'key': 'share', 'label': f'Share your link with {target} customers', 'done': shared, 'link': 'share',
+         'progress': {'value': min(reached, target), 'target': target, 'reached': reached},
+         'text': f'{reached} customers have joined or booked through your link.' if shared
+         else f'{reached} of {target} customers have joined or booked through your link so far.'},
     ]
     return {'steps': steps, 'completed': sum(s['done'] for s in steps), 'total': len(steps)}
 

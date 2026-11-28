@@ -22,8 +22,9 @@ class BookingPolicy(models.Model):
     max_advance_days = models.PositiveIntegerField(
         default=60, help_text='How far ahead customers can book'
     )
+    # Off by default: online bookings wait as pending so the team can confirm and plan around them.
     auto_confirm = models.BooleanField(
-        default=True, help_text='Confirm online bookings straight away instead of leaving them pending'
+        default=False, help_text='Confirm online bookings straight away instead of leaving them pending'
     )
 
     # Cancellation, rescheduling and late arrivals
@@ -170,11 +171,20 @@ class Customer(models.Model):
     opt_out_whatsapp = models.BooleanField(default=False)
     opt_out_push = models.BooleanField(default=False)
     first_channel = models.CharField(max_length=20, blank=True, default='', help_text='How they first booked')
+    # Set when the customer signs up or signs in on the business's booking link.
+    account = models.ForeignKey(
+        'customers.CustomerAccount', on_delete=models.SET_NULL, null=True, blank=True, related_name='memberships',
+    )
+    joined_at = models.DateTimeField(null=True, blank=True, help_text='When they joined through the booking link')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ['full_name']
+        constraints = [
+            UniqueConstraint(fields=['business', 'account'], condition=Q(account__isnull=False),
+                             name='one_customer_record_per_account'),
+        ]
 
     def opted_out(self, channel):
         return bool(getattr(self, f'opt_out_{channel}', False))

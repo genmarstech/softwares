@@ -14,6 +14,7 @@ from rest_framework.views import APIView
 
 from business.mixins import BusinessScopedMixin, owned_businesses
 from business.models import Business, BusinessStaff, Service
+from customers import services as customer_accounts
 from notifications import services as notify
 from notifications.models import Notification
 
@@ -430,7 +431,11 @@ class PublicBookingCreateView(PublicAPIView):
 
     def post(self, request, business_id):
         business = public_business(business_id)
-        s = PublicBookingInputSerializer(data=request.data)
+        # A customer signed in on the booking link books as themselves; guests give their details.
+        account = customer_accounts.current_account(request)
+        if account is not None:
+            customer_accounts.enforce_csrf(request)
+        s = PublicBookingInputSerializer(data=request.data, context={'account': account})
         s.is_valid(raise_exception=True)
         data = s.validated_data
         service = Service.objects.filter(pk=data['service'], business=business, is_available=True).first()
@@ -443,9 +448,12 @@ class PublicBookingCreateView(PublicAPIView):
                 return Response({'staff': ['This staff member is not available.']}, status=400)
 
         source = data.get('source') or 'direct'
-        customer = services.find_or_create_customer(
-            business, data['full_name'], data.get('email', ''), data.get('phone_number', ''), channel=source,
-        )
+        if account is not None:
+            customer = customer_accounts.join_business(account, business, channel=source)
+        else:
+            customer = services.find_or_create_customer(
+                business, data['full_name'], data.get('email', ''), data.get('phone_number', ''), channel=source,
+            )
         if data.get('preferred_channel'):
             customer.preferred_channel = data['preferred_channel']
             customer.save(update_fields=['preferred_channel', 'updated_at'])

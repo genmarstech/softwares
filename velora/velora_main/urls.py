@@ -29,6 +29,7 @@ urlpatterns = [
     path('idn/', include('identity.urls')),
     path('bn/', include('business.urls')),
     path('bk/', include('bookings.urls')),
+    path('cu/', include('customers.urls')),
 ]
 
 
