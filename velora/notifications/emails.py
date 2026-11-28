@@ -25,6 +25,20 @@ def logo_url():
     return getattr(settings, 'VELORA_EMAIL_LOGO_URL', '') or f'{settings.FRONTEND_URL}/brand/email-logo.png'
 
 
+def parent_company():
+    return getattr(settings, 'VELORA_PARENT_COMPANY', 'Genmars Tech') or 'Genmars Tech'
+
+
+def text_footer(notification):
+    """Footer for the plain-text part of an email."""
+    business = notification.business
+    if notification.recipient_type == 'customer' and business and business.business_name:
+        line = f'Sent for {business.business_name} by Velora.'
+    else:
+        line = 'Velora · Bookings & appointments.'
+    return f'--\n{line} Velora is a product of {parent_company()}.'
+
+
 def _blocks(body):
     """Turn the plain text into a list of (kind, data) blocks for the template."""
     blocks, details, buttons, signoff = [], [], [], ''
@@ -71,4 +85,6 @@ def render_html(notification):
         'business_name': business.business_name if business else '',
         'logo_url': logo_url(),
         'site_url': settings.FRONTEND_URL,
+        'parent_company': parent_company(),
+        'parent_company_url': getattr(settings, 'VELORA_PARENT_COMPANY_URL', ''),
     })

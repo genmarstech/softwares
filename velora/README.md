@@ -104,8 +104,16 @@ are respected.
   template `notifications/templates/notifications/email.html`). Customer emails lead with the
   business's name; emails to the business show the Velora logo from
   `FRONTEND_URL/brand/email-logo.png` (override with `VELORA_EMAIL_LOGO_URL`).
-  Emails show the business name as the sender name, and customer replies go to the business email.
-  Without a key, emails are only logged.
+  Emails come from `VELORA_EMAIL_FROM` (falls back to `RESEND_FROM_EMAIL`) as "Velora" to the business
+  and "<Business> via Velora" to customers (name set by `VELORA_EMAIL_FROM_NAME`); customer replies go to
+  the business email. Every footer says "Velora is a product of Genmars Tech" (`VELORA_PARENT_COMPANY`,
+  optional link `VELORA_PARENT_COMPANY_URL`). Without a key, emails are only logged.
+- **Both parties get an email straight away** on every key booking event: booked (received, on hold or
+  confirmed), confirmed, declined, cancelled, moved, hold released, no-show and payment recorded. The
+  customer gets it even if the business turned the email channel off (unless the customer opted out of
+  email); the business inbox gets it whatever the "Team alerts" setting, which now only controls the
+  staff member's email and the owner's Telegram / WhatsApp alerts. Only reminders and post-visit
+  follow-ups are scheduled for later; retries after a failed send also wait for `process_notifications`.
 - **SMS, WhatsApp and push** use the console provider (log only) until their providers are chosen.
 - Every new online booking emails the business inbox (and the assigned staff member) with the
   customer's name, phone, email, service, time and notes.
