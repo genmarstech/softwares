@@ -13,7 +13,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from business.models import BusinessStaff
+from business.models import BusinessStaff, Service
 from .models import (
     Booking, BookingEvent, BookingPolicy, Customer, Payment, Resource, TimeOff, WaitlistEntry,
     WorkingHours, active_bookings_q,
@@ -226,6 +226,110 @@ def get_available_slots(business, service, day, staff=None, enforce_window=True,
                 cursor += step
     return [slots[k] for k in sorted(slots)]
 
+
+
+
+def has_open_hours(business):
+    return WorkingHours.objects.filter(business=business, staff__isnull=True, is_closed=False).exists()
+
+
+def confirm_opening_hours(business):
+    policy = get_policy(business)
+    if not policy.hours_confirmed:
+        policy.hours_confirmed = True
+        policy.save(update_fields=['hours_confirmed', 'updated_at'])
+
+
+def hours_confirmed(business):
+    if get_policy(business).hours_confirmed:
+        return True
+    # Businesses that already changed their hours before this flag existed count as confirmed.
+    from .overview import _hours_customised
+    if _hours_customised(business):
+        confirm_opening_hours(business)
+        return True
+    return False
+
+
+def service_readiness(business, service, staff_members=None, days=7):
+    """Why ``service`` cannot be booked online, or '' if it can.
+
+    Ignores existing bookings: it answers "is it set up?", not "is it free?".
+    Reasons: 'hours_not_set' (the owner has not confirmed opening hours), 'no_team' (no available team member at all), 'no_skill' (nobody
+    is set up to do it), 'no_hours' (nobody who can do it works in the next
+    ``days`` days, or no working day is long enough for it).
+    """
+    if not hours_confirmed(business):
+        return 'hours_not_set'
+    if staff_members is None:
+        staff_members = list(BusinessStaff.objects.filter(business=business, is_available=True)
+                             .prefetch_related('skills'))
+    if not staff_members:
+        return 'no_team'
+    able = [m for m in staff_members if not m.skills.all() or service.id in {s.id for s in m.skills.all()}]
+    if not able:
+        return 'no_skill'
+    tz = business_tz(get_policy(business))
+    need = timedelta(minutes=service.duration_minutes + service.buffer_before_minutes
+                     + service.buffer_after_minutes)
+    today = timezone.now().astimezone(tz).date()
+    for offset in range(days):
+        day = today + timedelta(days=offset)
+        for member in able:
+            if any(iv.end - iv.start >= need for iv in working_intervals(business, member, day, tz)):
+                return ''
+    return 'no_hours'
+
+
+def booking_readiness(business):
+    """Can customers book online? Lists what to fix for the owner's dashboard."""
+    staff_members = list(BusinessStaff.objects.filter(business=business, is_available=True)
+                         .prefetch_related('skills'))
+    offered = list(Service.objects.filter(business=business, is_available=True).order_by('service_name'))
+    blocked = {}
+    for service in offered:
+        reason = service_readiness(business, service, staff_members)
+        if reason:
+            blocked[service.id] = (service, reason)
+    issues = []
+    confirmed = hours_confirmed(business)
+    if not confirmed:
+        issues.append({'key': 'hours_not_set', 'link': 'schedule',
+                       'text': 'Set your opening hours. Your booking link stays closed until you have confirmed '
+                               'when you are open.'})
+    if not offered:
+        issues.append({'key': 'no_services', 'link': 'services',
+                       'text': 'Add at least one service so customers have something to book.'})
+    elif not staff_members:
+        issues.append({'key': 'no_team', 'link': 'team',
+                       'text': 'Customers cannot book online yet: add a team member (you can add yourself) '
+                               'and mark them available. Open times come from your team\'s working hours.'})
+    else:
+        no_skill = [svc.service_name for svc, r in blocked.values() if r == 'no_skill']
+        no_hours = [svc.service_name for svc, r in blocked.values() if r == 'no_hours']
+        if no_skill:
+            issues.append({'key': 'no_skill', 'link': 'team', 'services': no_skill,
+                           'text': f'Nobody on your team is set up to do {_names(no_skill)}, so customers cannot '
+                                   'book it. In Team, add it to someone\'s services (or leave their services empty '
+                                   'so they can do everything).'})
+        if no_hours:
+            issues.append({'key': 'no_hours', 'link': 'schedule', 'services': no_hours,
+                           'text': f'There are no working hours in the next 7 days long enough for '
+                                   f'{_names(no_hours)}. Check your opening hours in Schedule.'})
+    return {
+        'ready': confirmed and bool(offered) and len(blocked) < len(offered),
+        'all_ready': confirmed and bool(offered) and not blocked,
+        'hours_confirmed': confirmed,
+        'issues': issues,
+        'unbookable_service_ids': sorted(blocked) if confirmed else [s.id for s in offered],
+    }
+
+
+def _names(names):
+    quoted = [f'"{n}"' for n in names[:3]]
+    more = len(names) - len(quoted)
+    text = ', '.join(quoted)
+    return f'{text} and {more} more' if more > 0 else text
 
 # ---------------------------------------------------------------------------
 # Audit

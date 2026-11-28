@@ -15,8 +15,8 @@ from business.models import BusinessStaff, Service
 from customers.services import SETUP_SHARE_TARGET, reached_customers
 from notifications.models import Notification
 
-from .models import Booking, FunnelEvent, Payment, TimeOff, WorkingHours
-from .services import DEFAULT_CLOSE, DEFAULT_OPEN, business_tz, get_policy, working_intervals
+from .models import Booking, FunnelEvent, Payment, TimeOff, WaitlistEntry, WorkingHours
+from .services import DEFAULT_CLOSE, DEFAULT_OPEN, booking_readiness, business_tz, get_policy, working_intervals
 
 S = Booking.Status
 # Bookings that count towards revenue: everything except cancelled and no-shows.
@@ -130,7 +130,9 @@ def setup_steps(business):
     )
     has_services = Service.objects.filter(business=business, is_available=True).exists()
     has_team = BusinessStaff.objects.filter(business=business).exists()
-    has_hours = _hours_customised(business)
+    # Done once the owner has saved or confirmed their opening hours (see BookingPolicy.hours_confirmed).
+    from .services import hours_confirmed
+    has_hours = hours_confirmed(business)
     # Customers who joined or booked through the link (see customers.services.reached_customers).
     target = SETUP_SHARE_TARGET
     reached = reached_customers(business).count()
@@ -239,6 +241,11 @@ def build_overview(business, day):
             business=business, start__gte=now, status__in=(S.PENDING, S.HELD)
         ).count(),
         'failed_messages': failed_messages,
+        # Anything stopping customers from booking online (no team, no skills, no hours).
+        'readiness': booking_readiness(business),
+        'waitlist': WaitlistEntry.objects.filter(
+            business=business, status=WaitlistEntry.Status.WAITING, desired_date__gte=day,
+        ).count(),
     }
 
 

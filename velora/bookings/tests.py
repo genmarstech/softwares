@@ -48,6 +48,7 @@ class VeloraTestCase(TestCase):
         services.ensure_business_defaults(self.other_business)
         self.policy = services.get_policy(self.business)
         self.policy.min_notice_minutes = 0
+        self.policy.hours_confirmed = True
         self.policy.save()
         self.service = Service.objects.create(
             business=self.business, service_name='Haircut', price=Decimal('1000'), duration_minutes=60,
@@ -614,6 +615,8 @@ class OverviewTests(VeloraTestCase):
         self.assertEqual(body['top_services'][0]['bookings'], 2)
 
     def test_setup_checklist_reflects_real_records(self):
+        self.policy.hours_confirmed = False
+        self.policy.save()
         self.login()
         steps = {s['key']: s['done'] for s in self.client.get(
             '/bk/overview/', {'business': self.business.id}).json()['setup']['steps']}
@@ -657,3 +660,73 @@ class OverviewTests(VeloraTestCase):
         self.login(self.other)
         for url in ('/bk/overview/', '/bk/overview/performance/', '/bk/payments/'):
             self.assertEqual(self.client.get(url, {'business': self.business.id}).status_code, 404, url)
+
+
+class BookingReadinessTests(VeloraTestCase):
+    def readiness(self):
+        self.login()
+        return self.client.get('/bk/overview/', {'business': self.business.id}).json()['readiness']
+
+    def test_ready_when_someone_can_do_every_service(self):
+        body = self.readiness()
+        self.assertTrue(body['all_ready'])
+        self.assertEqual(body['issues'], [])
+        public = APIClient().get('/bk/public/glow-salon/').json()
+        self.assertTrue(public['accepting_bookings'])
+        self.assertTrue(public['services'][0]['bookable'])
+
+    def test_no_team_blocks_online_booking(self):
+        self.staff.delete()
+        body = self.readiness()
+        self.assertFalse(body['ready'])
+        self.assertEqual([i['key'] for i in body['issues']], ['no_team'])
+        public = APIClient().get('/bk/public/glow-salon/').json()
+        self.assertFalse(public['accepting_bookings'])
+        self.assertFalse(public['services'][0]['bookable'])
+        response = APIClient().post('/bk/public/glow-salon/bookings/', {
+            'service': self.service.id, 'start': at(self.monday, 10).isoformat(), 'full_name': 'Ann Guest',
+            'email': 'ann@example.com', 'phone_number': '0711000000'}, format='json')
+        self.assertEqual(response.json()['code'], 'not_ready')
+
+    def test_service_nobody_is_skilled_for(self):
+        massage = Service.objects.create(business=self.business, service_name='Neck massage',
+                                         price=Decimal('800'), duration_minutes=30)
+        self.staff.skills.add(self.service)
+        body = self.readiness()
+        self.assertTrue(body['ready'])
+        self.assertFalse(body['all_ready'])
+        self.assertEqual(body['unbookable_service_ids'], [massage.id])
+        self.assertEqual(body['issues'][0]['key'], 'no_skill')
+        self.assertIn('Neck massage', body['issues'][0]['text'])
+
+    def test_no_working_hours(self):
+        WorkingHours.objects.filter(business=self.business).update(is_closed=True)
+        body = self.readiness()
+        self.assertEqual([i['key'] for i in body['issues']], ['no_hours'])
+
+    def test_overview_counts_waitlist(self):
+        WaitlistEntry.objects.create(business=self.business, customer=self.customer, service=self.service,
+                                     desired_date=self.monday)
+        self.login()
+        self.assertEqual(self.client.get('/bk/overview/', {'business': self.business.id}).json()['waitlist'], 1)
+
+    def test_link_stays_closed_until_hours_are_confirmed(self):
+        self.policy.hours_confirmed = False
+        self.policy.save()
+        body = self.readiness()
+        self.assertFalse(body['ready'])
+        self.assertEqual(body['issues'][0]['key'], 'hours_not_set')
+        self.assertFalse(APIClient().get('/bk/public/glow-salon/').json()['accepting_bookings'])
+        steps = {s['key']: s['done'] for s in self.client.get(
+            '/bk/overview/', {'business': self.business.id}).json()['setup']['steps']}
+        self.assertFalse(steps['hours'])
+        # Keeping the default hours still counts once the owner confirms them.
+        response = self.client.post(f'/bk/working-hours/confirm/?business={self.business.id}')
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(self.readiness()['ready'])
+
+    def test_cannot_confirm_when_closed_every_day(self):
+        WorkingHours.objects.filter(business=self.business).update(is_closed=True)
+        self.login()
+        response = self.client.post(f'/bk/working-hours/confirm/?business={self.business.id}')
+        self.assertEqual(response.status_code, 400)

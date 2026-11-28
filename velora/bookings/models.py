@@ -58,6 +58,9 @@ class BookingPolicy(models.Model):
     quiet_hours_end = models.TimeField(null=True, blank=True)
     notify_staff = models.BooleanField(default=True)
 
+    # The owner has set (or reviewed) their opening hours. Online booking stays closed until then.
+    hours_confirmed = models.BooleanField(default=False)
+
     updated_at = models.DateTimeField(auto_now=True)
 
     def save(self, *args, **kwargs):
@@ -209,6 +212,7 @@ class Booking(models.Model):
         PHONE = 'phone', 'Phone'
         STAFF = 'staff', 'Added by staff'
         WHATSAPP = 'whatsapp', 'WhatsApp'
+        TELEGRAM = 'telegram', 'Telegram'
         API = 'api', 'API'
 
     ACTIVE_STATUSES = (Status.PENDING, Status.HELD, Status.CONFIRMED, Status.RESCHEDULED)

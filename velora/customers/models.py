@@ -17,6 +17,9 @@ class CustomerAccount(models.Model):
     full_name = models.CharField(max_length=255)
     email = models.EmailField(blank=True, default='')
     password = models.CharField(max_length=128)
+    # Set when the person proved they own the number: WhatsApp messages come from
+    # the number itself, and Telegram shares a contact only for the user's own number.
+    phone_verified_at = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
     last_login = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -33,6 +36,10 @@ class CustomerAccount(models.Model):
             self.set_password(raw)
             self.save(update_fields=['password'])
         return check_password(raw_password, self.password, upgrade)
+
+    @property
+    def phone_verified(self):
+        return self.phone_verified_at is not None
 
     def __str__(self):
         return f'{self.full_name} ({self.phone_number})'
