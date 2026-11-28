@@ -103,6 +103,25 @@ class WorkingHoursViewSet(BusinessScopedMixin, viewsets.ModelViewSet):
         services.ensure_business_defaults(self.get_business())
         return super().list(request, *args, **kwargs)
 
+    def _mark_confirmed(self, hours):
+        if hours.staff_id is None:
+            services.confirm_opening_hours(hours.business)
+
+    def perform_create(self, serializer):
+        self._mark_confirmed(serializer.save())
+
+    def perform_update(self, serializer):
+        self._mark_confirmed(serializer.save())
+
+    @action(detail=False, methods=['post'])
+    def confirm(self, request):
+        """The owner has reviewed their opening hours (even if they kept the defaults)."""
+        business = self.get_business()
+        if not services.has_open_hours(business):
+            return Response({'detail': 'Open at least one day so customers can book.'}, status=400)
+        services.confirm_opening_hours(business)
+        return Response({'hours_confirmed': True})
+
 
 class TimeOffViewSet(BusinessScopedMixin, viewsets.ModelViewSet):
     queryset = TimeOff.objects.select_related('staff')
@@ -362,6 +381,8 @@ class PublicBusinessView(PublicAPIView):
         services_qs = business.services.filter(is_available=True).order_by('service_name')
         staff_qs = BusinessStaff.objects.filter(business=business, is_available=True).prefetch_related('skills')
         logo = request.build_absolute_uri(business.business_logo.url) if business.business_logo else None
+        readiness = services.booking_readiness(business)
+        unbookable = set(readiness['unbookable_service_ids'])
         return Response({
             'id': business.id,
             'slug': business.slug,
@@ -372,7 +393,12 @@ class PublicBusinessView(PublicAPIView):
             'business_logo': logo,
             'whatsapp_number': business.whatsapp_number,
             'business_email': business.business_email,
-            'services': PublicServiceSerializer(services_qs, many=True).data,
+            # Services nobody can currently do (no team, skills or hours) are flagged, not hidden.
+            'services': [
+                {**row, 'bookable': row['id'] not in unbookable}
+                for row in PublicServiceSerializer(services_qs, many=True).data
+            ],
+            'accepting_bookings': readiness['ready'],
             'staff': PublicStaffSerializer(staff_qs, many=True).data,
             'policy': {
                 'timezone': policy.timezone,
@@ -441,6 +467,11 @@ class PublicBookingCreateView(PublicAPIView):
         service = Service.objects.filter(pk=data['service'], business=business, is_available=True).first()
         if service is None:
             return Response({'service': ['This service is not available.']}, status=400)
+        # The link only takes bookings once the business has a team with open times for this service.
+        if services.service_readiness(business, service):
+            return Response({'detail': f'{business.business_name} is not taking online bookings for this '
+                                       'service yet. Please contact them directly.', 'code': 'not_ready'},
+                            status=400)
         staff = None
         if data.get('staff'):
             staff = BusinessStaff.objects.filter(pk=data['staff'], business=business, is_available=True).first()

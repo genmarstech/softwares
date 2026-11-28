@@ -58,6 +58,9 @@ class BookingPolicy(models.Model):
     quiet_hours_end = models.TimeField(null=True, blank=True)
     notify_staff = models.BooleanField(default=True)
 
+    # The owner has set (or reviewed) their opening hours. Online booking stays closed until then.
+    hours_confirmed = models.BooleanField(default=False)
+
     updated_at = models.DateTimeField(auto_now=True)
 
     def save(self, *args, **kwargs):
