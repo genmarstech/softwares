@@ -1,21 +1,100 @@
+# Velora backend, production on this computer.
+#
+#   bookingdb  Postgres 17. Its data volume is the one local development always used.
+#   migrate    runs once on every `up`, before the API starts.
+#   api        gunicorn.
+#   web        nginx in front: /static/, /media/ (logos), everything else to api.
+#              Published on 127.0.0.1:8002 only; the host's cloudflared forwards
+#              api.getvelora.co.ke there (see docs/DEPLOY.md).
+#   scheduler  reminders, retries, hold expiry every minute; summaries every Monday.
+#
+# Settings: .env (shared with local dev, holds the database values and secrets) and
+# then .env.production, which overrides it for the containers. Only the database
+# values are read by Compose itself, for Postgres.
+#
+# For local development, `docker compose up -d bookingdb` still starts only Postgres.
+
+x-app: &app
+  build: .
+  image: velora-api
+  restart: unless-stopped
+  env_file:
+    - path: .env
+      required: true
+    - path: .env.production
+      required: false
+  environment:
+    # Inside Compose the database is the bookingdb service, whatever .env says for dev.
+    DB_HOST: bookingdb
+    DB_PORT: "5432"
+    BEHIND_PROXY: "1"
+  volumes:
+    - ./media:/app/media
+  depends_on:
+    bookingdb:
+      condition: service_healthy
 
 services:
   bookingdb:
     image: postgres:17-alpine
     container_name: velora_db
     restart: unless-stopped
-
-    # Values come from velora/.env (see .env.example), so no password is committed.
     environment:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME}
-
+    # Loopback only, for `runserver` during development. It used to listen on every
+    # interface, which put the bookings database on the local network.
     ports:
-      - "5432:5432"
-
+      - "127.0.0.1:5432:5432"
     volumes:
       - bookingdb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    <<: *app
+    restart: "no"
+    command: sh -c "python manage.py migrate --noinput && python manage.py collectstatic --noinput"
+    volumes:
+      - ./media:/app/media
+      - static:/app/staticfiles
+
+  api:
+    <<: *app
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/admin/login/', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  scheduler:
+    <<: *app
+    command: python manage.py run_scheduler
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  web:
+    image: nginx:1.29-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${VELORA_WEB_PORT:-8002}:80"
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - static:/srv/static:ro
+      - ./media:/srv/media:ro
+    depends_on:
+      api:
+        condition: service_healthy
 
 volumes:
   bookingdb_data:
+  static:

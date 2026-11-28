@@ -16,9 +16,12 @@ python manage.py runserver
 
 Run the tests with `USE_SQLITE=1 python manage.py test`.
 
+Production runs in Docker behind Cloudflare Tunnel: see [docs/DEPLOY.md](docs/DEPLOY.md).
+
 ### Background jobs
 
-Two commands should be scheduled (cron or a systemd timer):
+In the containers, the `scheduler` service (`python manage.py run_scheduler`) runs both of these.
+Without Docker, schedule them yourself (cron or a systemd timer):
 
 | Command | When | What it does |
 | --- | --- | --- |
