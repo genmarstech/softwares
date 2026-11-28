@@ -3,7 +3,8 @@
 - ``console``: logs the message and reports it as sent (development, and the
   fallback for every channel without a real provider).
 - ``resend``: sends email through https://resend.com. Needs ``RESEND_API_KEY``
-  and ``RESEND_FROM_EMAIL`` (a sender on a domain verified in Resend). Each email has the
+  and a sender on a domain verified in Resend: ``VELORA_EMAIL_FROM`` (falls back
+  to ``RESEND_FROM_EMAIL``), shown as ``VELORA_EMAIL_FROM_NAME``. Each email has the
   plain text and a branded HTML version (see ``notifications/emails.py``).
 
 SMS, WhatsApp and push still use ``console``. Providers are picked per channel
@@ -44,24 +45,35 @@ class ResendProvider:
         from django.conf import settings
 
         self.api_key = getattr(settings, 'RESEND_API_KEY', '')
-        self.from_email = getattr(settings, 'RESEND_FROM_EMAIL', '')
+        self.from_email = (getattr(settings, 'VELORA_EMAIL_FROM', '')
+                           or getattr(settings, 'RESEND_FROM_EMAIL', ''))
+        self.from_name = getattr(settings, 'VELORA_EMAIL_FROM_NAME', 'Velora') or 'Velora'
         if not self.api_key or not self.from_email:
-            raise ProviderError('Resend needs RESEND_API_KEY and RESEND_FROM_EMAIL.')
+            raise ProviderError('Resend needs RESEND_API_KEY and VELORA_EMAIL_FROM (or RESEND_FROM_EMAIL).')
+
+    @staticmethod
+    def _clean(name):
+        return name.replace('"', '').replace('<', '').replace('>', '').strip()
+
+    def sender(self, notification):
+        if '<' in self.from_email:
+            return self.from_email
+        name = self._clean(self.from_name)
+        business = notification.business
+        if notification.recipient_type == 'customer' and business and business.business_name:
+            # "Glow Salon via Velora <info@...>" so customers see who they booked with.
+            name = f'{self._clean(business.business_name)} via {name}'
+        return f'"{name}" <{self.from_email}>' if name else self.from_email
 
     def payload(self, notification):
-        from .emails import render_html
+        from .emails import render_html, text_footer
 
         business = notification.business
-        sender = self.from_email
-        if '<' not in sender and business.business_name:
-            # Show the salon's name in the inbox: "Glow Salon <bookings@getvelora.co.ke>"
-            name = business.business_name.replace('"', '').replace('<', '').replace('>', '')
-            sender = f'"{name}" <{sender}>'
         data = {
-            'from': sender,
+            'from': self.sender(notification),
             'to': [notification.to_address],
             'subject': notification.subject or notification.get_event_display(),
-            'text': notification.body,
+            'text': f'{notification.body}\n\n{text_footer(notification)}',
             'html': render_html(notification),
         }
         # Customers who reply reach the business, not the Velora sender address.

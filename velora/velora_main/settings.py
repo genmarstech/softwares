@@ -254,6 +254,15 @@ MAILERS = {
 RESEND_API_KEY = os.getenv('RESEND_API_KEY', '')
 # A sender on a domain verified in Resend, e.g. bookings@getvelora.co.ke
 RESEND_FROM_EMAIL = os.getenv('RESEND_FROM_EMAIL', '')
+# The address every Velora email is sent from (customers and businesses), e.g.
+# info@genmarstech.com. Must be on a domain verified in Resend. Falls back to
+# RESEND_FROM_EMAIL.
+VELORA_EMAIL_FROM = os.getenv('VELORA_EMAIL_FROM', '') or RESEND_FROM_EMAIL
+# Name shown in the inbox. Customer emails read "<Business> via Velora".
+VELORA_EMAIL_FROM_NAME = os.getenv('VELORA_EMAIL_FROM_NAME', 'Velora')
+# Credited in every email footer as Velora's parent company.
+VELORA_PARENT_COMPANY = os.getenv('VELORA_PARENT_COMPANY', 'Genmars Tech')
+VELORA_PARENT_COMPANY_URL = os.getenv('VELORA_PARENT_COMPANY_URL', '')
 # Telegram and WhatsApp bots (app ``bots``, setup in docs/BOTS.md).
 # Telegram: create the bot with @BotFather.
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '')

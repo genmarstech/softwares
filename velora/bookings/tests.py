@@ -369,6 +369,91 @@ class NotificationTests(VeloraTestCase):
         call_command('process_notifications', stdout=open('/dev/null', 'w'))
 
 
+class BothPartiesEmailTests(VeloraTestCase):
+    """Key booking events email the customer and the business straight away."""
+
+    def emails(self, booking, event, recipient_type):
+        return Notification.objects.filter(booking=booking, event=event, channel='email',
+                                           recipient_type=recipient_type)
+
+    def test_each_key_event_emails_both_parties_immediately(self):
+        booking = self.book(at(self.monday, 10))  # pending by default
+        self.assertTrue(self.emails(booking, 'booking_created', 'customer').filter(status='sent').exists())
+        self.assertTrue(self.emails(booking, 'staff_new_booking', 'business').filter(status='sent').exists())
+
+        with self.captureOnCommitCallbacks(execute=True):
+            services.confirm_booking(booking)
+        self.assertEqual(self.emails(booking, 'booking_confirmed', 'customer').get().status, 'sent')
+        self.assertEqual(self.emails(booking, 'booking_confirmed', 'business').get().to_address, 'glow@example.com')
+
+        with self.captureOnCommitCallbacks(execute=True):
+            services.record_payment(booking, amount=Decimal('500'), kind=Payment.Kind.BALANCE)
+        self.assertEqual(self.emails(booking, 'payment_receipt', 'customer').get().status, 'sent')
+        self.assertIn('Payment recorded: 500', self.emails(booking, 'payment_receipt', 'business').get().body)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            services.reschedule_booking(booking, start=at(self.monday, 14), actor_type=BookingEvent.Actor.OWNER)
+        self.assertEqual(self.emails(booking, 'booking_rescheduled', 'customer').get().status, 'sent')
+        self.assertTrue(self.emails(booking, 'staff_booking_changed', 'business').filter(status='sent').exists())
+
+        with mock.patch('django.utils.timezone.now', return_value=at(self.monday, 18)):
+            with self.captureOnCommitCallbacks(execute=True):
+                services.mark_no_show(booking)
+        self.assertEqual(self.emails(booking, 'booking_no_show', 'customer').get().status, 'sent')
+        self.assertEqual(self.emails(booking, 'booking_no_show', 'business').get().status, 'sent')
+
+        # Only reminders are left waiting, and those were cancelled by the no-show.
+        self.assertFalse(Notification.objects.filter(booking=booking, status='queued').exists())
+
+    def test_declining_a_pending_booking_says_declined(self):
+        booking = self.book(at(self.monday, 10))
+        with self.captureOnCommitCallbacks(execute=True):
+            services.cancel_booking(booking, actor_type=BookingEvent.Actor.OWNER, reason='Fully booked')
+        customer = self.emails(booking, 'booking_cancelled', 'customer').get()
+        self.assertIn('declined', customer.subject)
+        business = self.emails(booking, 'staff_booking_changed', 'business').get()
+        self.assertIn('Declined', business.body)
+        self.assertIn('Fully booked', business.body)
+
+    def test_customer_cancelling_emails_the_business(self):
+        booking = self.book(at(self.monday, 10))
+        with self.captureOnCommitCallbacks(execute=True):
+            services.cancel_booking(booking, actor_type=BookingEvent.Actor.CUSTOMER)
+        self.assertEqual(self.emails(booking, 'booking_cancelled', 'customer').get().subject,
+                         'Booking cancelled · Glow Salon')
+        self.assertIn('Cancelled by customer', self.emails(booking, 'staff_booking_changed', 'business').get().body)
+
+    def test_customer_gets_email_even_when_business_turned_email_off(self):
+        self.policy.notification_channels = ['sms']
+        self.policy.save()
+        booking = self.book(at(self.monday, 10))
+        self.assertTrue(self.emails(booking, 'booking_created', 'customer').exists())
+        # Reminders still follow the business's channels.
+        self.policy.auto_confirm = True
+        self.policy.save()
+        later = self.book(at(self.monday, 14))
+        self.assertFalse(Notification.objects.filter(booking=later, event='reminder', channel='email').exists())
+
+    def test_email_opt_out_still_wins(self):
+        self.customer.opt_out_email = True
+        self.customer.save()
+        booking = self.book(at(self.monday, 10))
+        self.assertFalse(self.emails(booking, 'booking_created', 'customer').exists())
+
+    def test_business_inbox_emailed_even_with_team_alerts_off(self):
+        self.policy.notify_staff = False
+        self.policy.save()
+        booking = self.book(at(self.monday, 10))
+        self.assertTrue(self.emails(booking, 'staff_new_booking', 'business').exists())
+        self.assertFalse(self.emails(booking, 'staff_new_booking', 'staff').exists())
+
+    def test_falls_back_to_owner_email_without_business_email(self):
+        Business.objects.filter(pk=self.business.pk).update(business_email='')
+        self.business.refresh_from_db()
+        booking = self.book(at(self.monday, 10), business=self.business)
+        self.assertEqual(self.emails(booking, 'staff_new_booking', 'business').get().to_address, 'owner@example.com')
+
+
 class AnalyticsTests(VeloraTestCase):
     def test_report_and_exports(self):
         b1 = self.book(at(self.monday, 10))
@@ -550,12 +635,25 @@ class ResendProviderTests(VeloraTestCase):
         self.assertEqual(request.get_header('Authorization'), 'Bearer re_test')
         import json
         payload = json.loads(request.data)
-        self.assertEqual(payload['from'], '"Glow Salon" <bookings@getvelora.co.ke>')
+        self.assertEqual(payload['from'], '"Glow Salon via Velora" <bookings@getvelora.co.ke>')
         self.assertEqual(payload['to'], ['jane@example.com'])
         self.assertEqual(payload['reply_to'], 'glow@example.com')
-        self.assertEqual(payload['text'], 'See you soon')
+        self.assertTrue(payload['text'].startswith('See you soon\n'))
+        self.assertIn('Velora is a product of Genmars Tech.', payload['text'])
         self.assertIn('See you soon', payload['html'])
+        self.assertIn('Velora is a product of', payload['html'])
+        self.assertIn('Genmars Tech', payload['html'])
         self.assertIn('Glow Salon', payload['html'])
+
+    @override_settings(VELORA_EMAIL_FROM='info@genmars.example', VELORA_EMAIL_FROM_NAME='Velora')
+    def test_sender_address_is_configurable(self):
+        from notifications.providers import ResendProvider
+        provider = ResendProvider()
+        to_business = self.make_notification(recipient_type='business', to_address='glow@example.com')
+        self.assertEqual(provider.payload(to_business)['from'], '"Velora" <info@genmars.example>')
+        self.assertNotIn('reply_to', provider.payload(to_business))
+        self.assertEqual(provider.payload(self.make_notification())['from'],
+                         '"Glow Salon via Velora" <info@genmars.example>')
 
     def test_html_email_turns_links_into_buttons_and_escapes_text(self):
         from notifications.emails import render_html

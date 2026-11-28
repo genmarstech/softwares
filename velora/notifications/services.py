@@ -75,8 +75,13 @@ def _provider_name(channel):
     return getattr(settings, 'VELORA_NOTIFICATION_PROVIDERS', {}).get(channel, 'console')
 
 
-def customer_targets(business, customer):
+def customer_targets(business, customer, always_email=False):
     """``[(channel, address)]`` for this customer: their channels plus any bot chats.
+
+    ``always_email`` adds email for key booking events (booked, confirmed,
+    declined, cancelled, moved, missed, paid) even when the business turned the
+    email channel off, so the customer always has a written record. A customer
+    who opted out of email still gets none.
 
     With a real WhatsApp provider, WhatsApp only goes to customers who have
     messaged the Velora WhatsApp bot (that is their opt-in). Telegram goes to
@@ -94,6 +99,9 @@ def customer_targets(business, customer):
         if channel == 'whatsapp' and (real_whatsapp or 'whatsapp' in chats):
             continue
         targets.append((channel, _address_for(customer, channel)))
+    if (always_email and customer.email and not customer.opted_out('email')
+            and 'email' not in [channel for channel, _ in targets]):
+        targets.insert(0, ('email', customer.email))
     targets += list(chats.items())
     return targets
 
@@ -145,14 +153,14 @@ def queue(*, business, event, channel, to_address, body, subject='', booking=Non
 
 
 def notify_customer(booking, event, subject, message, *, scheduled_for=None, respect_quiet_hours=False,
-                    with_actions=True):
+                    with_actions=True, always_email=True):
     from bots.engine import quiet_chat
 
     business, customer = booking.business, booking.customer
     created = []
     # The chat the customer is using right now already got the bot's answer.
     skip = quiet_chat.get() if scheduled_for is None else None
-    for channel, address in customer_targets(business, customer):
+    for channel, address in customer_targets(business, customer, always_email=always_email):
         if skip and skip == (channel, str(address)):
             continue
         body = f'Hi {customer.full_name.split(" ")[0]}, {message}'
@@ -171,30 +179,46 @@ def notify_customer(booking, event, subject, message, *, scheduled_for=None, res
     return created
 
 
-def notify_team(booking, event, message):
-    """Alert the assigned staff member and the business inbox."""
+def business_inbox(business):
+    """The email address the business gets booking emails on."""
+    if business.business_email:
+        return business.business_email
+    owner = getattr(business, 'business_owner', None)
+    return getattr(owner, 'email', '') or ''
+
+
+def notify_team(booking, event, message, *, chats=True):
+    """Email the business about a booking, and alert the assigned staff member.
+
+    The business inbox always gets an email for key booking events. The staff
+    member's email and the owner's Telegram / WhatsApp alerts follow the
+    "Team alerts" setting. ``chats=False`` keeps an event to email only (used
+    for updates the owner usually made themselves, such as confirming).
+    """
     business = booking.business
-    if not _policy(business).notify_staff:
-        return []
+    team_alerts = _policy(business).notify_staff
     created = []
     recipients = []
-    if booking.staff and booking.staff.staff_email:
+    inbox = business_inbox(business)
+    if inbox:
+        recipients.append(('business', business.business_name, inbox))
+    if team_alerts and booking.staff and booking.staff.staff_email \
+            and booking.staff.staff_email.lower() != inbox.lower():
         recipients.append(('staff', booking.staff.staff_name, booking.staff.staff_email))
-    if business.business_email and business.business_email not in [r[2] for r in recipients]:
-        recipients.append(('business', business.business_name, business.business_email))
+    subject = f'{Notification.Event(event).label}: {booking.customer.full_name}'
     for recipient_type, name, email in recipients:
         created.append(queue(
             business=business, booking=booking, event=event, channel='email', to_address=email,
-            subject=f'{Notification.Event(event).label}: {booking.customer.full_name}',
-            body=message, recipient_type=recipient_type, recipient_name=name,
+            subject=subject, body=message, recipient_type=recipient_type, recipient_name=name,
         ))
+    if not (team_alerts and chats):
+        return created
     # The owner's own Telegram and WhatsApp, linked on the dashboard's Channels page.
     from bots.booking import owner_chat_targets
     for channel, address, name in owner_chat_targets(business):
         created.append(queue(
             business=business, booking=booking, event=event, channel=channel, to_address=address,
-            subject=f'{Notification.Event(event).label}: {booking.customer.full_name}',
-            body=message, recipient_type='business', recipient_name=name,
+            subject=subject, body=message, recipient_type='business', recipient_name=name,
         ))
     return created
 
@@ -243,7 +267,7 @@ def schedule_reminders(booking):
         notify_customer(
             booking, Notification.Event.REMINDER, 'Appointment reminder',
             f'a reminder of your appointment in {label}: {_summary(booking)}.',
-            scheduled_for=send_at, respect_quiet_hours=False,
+            scheduled_for=send_at, respect_quiet_hours=False, always_email=False,
         )
 
 
@@ -336,6 +360,9 @@ def booking_created(booking):
 def booking_confirmed(booking):
     notify_customer(booking, Notification.Event.BOOKING_CONFIRMED, 'Booking confirmed',
                     f'your booking is confirmed: {_summary(booking)}.')
+    notify_team(booking, Notification.Event.BOOKING_CONFIRMED,
+                f'Booking confirmed: {booking.customer.full_name} for {_summary(booking)}.\n\n'
+                f'{_customer_card(booking)}', chats=False)
     schedule_reminders(booking)
     _send_now(booking)
 
@@ -346,21 +373,41 @@ def booking_rescheduled(booking, previous_start):
                     f'{_summary(booking)}.')
     notify_team(booking, Notification.Event.STAFF_BOOKING_CHANGED,
                 f'{booking.customer.full_name} moved {booking.service.service_name} from '
-                f'{_when(booking, previous_start)} to {_when(booking)}.')
+                f'{_when(booking, previous_start)} to {_when(booking)}.\n\n{_customer_card(booking)}')
     if booking.status != 'held':
         schedule_reminders(booking)
     _send_now(booking)
 
 
+def _was_declined(booking):
+    """A pending or held booking that the business turned down."""
+    if booking.cancelled_by != 'owner':
+        return False
+    event = booking.events.filter(action='cancelled').order_by('-created_at', '-id').first()
+    return bool(event and event.from_status in ('pending', 'held'))
+
+
 def booking_cancelled(booking):
     cancel_scheduled(booking)
+    if _was_declined(booking):
+        notify_customer(booking, Notification.Event.BOOKING_CANCELLED, 'Booking request declined',
+                        f'we are sorry, we cannot take your booking for {_summary(booking)}. '
+                        f'Please pick another time here: {booking_page_link(booking.business)}',
+                        with_actions=False)
+        notify_team(booking, Notification.Event.STAFF_BOOKING_CHANGED,
+                    f'Declined: {booking.customer.full_name}, {_summary(booking)}. '
+                    f'Reason: {booking.cancellation_reason or "none given"}.\n\n{_customer_card(booking)}',
+                    chats=False)
+        _send_now(booking)
+        return
     fee = f' A late cancellation fee of {booking.cancellation_fee} applies.' if booking.cancellation_fee else ''
     notify_customer(booking, Notification.Event.BOOKING_CANCELLED, 'Booking cancelled',
                     f'your booking for {_summary(booking)} has been cancelled.{fee} '
                     f'Book again any time: {booking_page_link(booking.business)}', with_actions=False)
     notify_team(booking, Notification.Event.STAFF_BOOKING_CHANGED,
                 f'Cancelled by {booking.cancelled_by or "unknown"}: {booking.customer.full_name}, '
-                f'{_summary(booking)}. Reason: {booking.cancellation_reason or "none given"}.')
+                f'{_summary(booking)}. Reason: {booking.cancellation_reason or "none given"}.\n\n'
+                f'{_customer_card(booking)}')
     _send_now(booking)
 
 
@@ -369,6 +416,9 @@ def hold_expired(booking):
     notify_customer(booking, Notification.Event.HOLD_EXPIRED, 'Booking released',
                     f'we did not receive the deposit for {_summary(booking)}, so the slot has been released. '
                     f'You can book again here: {booking_page_link(booking.business)}', with_actions=False)
+    notify_team(booking, Notification.Event.HOLD_EXPIRED,
+                f'Hold released: {booking.customer.full_name} did not pay the deposit for {_summary(booking)}, '
+                f'so the slot is free again.\n\n{_customer_card(booking)}', chats=False)
     _send_now(booking)
 
 
@@ -380,15 +430,20 @@ def booking_completed(booking):
         f'thank you for visiting us for {booking.service.service_name}. We would love your feedback. '
         f'Ready for the next one? {booking_page_link(booking.business)}',
         scheduled_for=timezone.now() + timedelta(hours=hours), respect_quiet_hours=True, with_actions=False,
+        always_email=False,
     )
     _send_now(booking)
 
 
 def booking_no_show(booking):
     cancel_scheduled(booking)
+    fee = f' A missed-appointment fee of {booking.cancellation_fee} applies.' if booking.cancellation_fee else ''
     notify_customer(booking, Notification.Event.BOOKING_NO_SHOW, 'We missed you',
-                    f'we missed you for {_summary(booking)}. Rebook here: {booking_page_link(booking.business)}',
-                    respect_quiet_hours=True, with_actions=False)
+                    f'we missed you for {_summary(booking)}.{fee} Rebook here: {booking_page_link(booking.business)}',
+                    with_actions=False)
+    notify_team(booking, Notification.Event.BOOKING_NO_SHOW,
+                f'Marked as a no-show: {booking.customer.full_name}, {_summary(booking)}.{fee}\n\n'
+                f'{_customer_card(booking)}', chats=False)
     _send_now(booking)
 
 
@@ -398,6 +453,10 @@ def payment_receipt(payment):
                     f'we received {payment.amount} ({payment.get_kind_display().lower()}, '
                     f'{payment.get_method_display().lower()}) for {_summary(booking)}. '
                     f'Balance due: {booking.balance_due}.')
+    notify_team(booking, Notification.Event.PAYMENT_RECEIPT,
+                f'Payment recorded: {payment.amount} ({payment.get_kind_display().lower()}, '
+                f'{payment.get_method_display().lower()}) from {booking.customer.full_name} for {_summary(booking)}. '
+                f'Balance due: {booking.balance_due}.\n\n{_customer_card(booking)}', chats=False)
     _send_now(booking)
 
 
