@@ -75,6 +75,7 @@ INSTALLED_APPS = [
     'bookings',
     'notifications',
     'customers',
+    'bots',
 ]
 
 MIDDLEWARE = [
@@ -253,10 +254,27 @@ MAILERS = {
 RESEND_API_KEY = os.getenv('RESEND_API_KEY', '')
 # A sender on a domain verified in Resend, e.g. bookings@getvelora.co.ke
 RESEND_FROM_EMAIL = os.getenv('RESEND_FROM_EMAIL', '')
+# Telegram and WhatsApp bots (app ``bots``, setup in docs/BOTS.md).
+# Telegram: create the bot with @BotFather.
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '')
+TELEGRAM_BOT_USERNAME = os.getenv('TELEGRAM_BOT_USERNAME', '').lstrip('@')
+# Any long random string; Telegram sends it back on every webhook call.
+TELEGRAM_WEBHOOK_SECRET = os.getenv('TELEGRAM_WEBHOOK_SECRET', '')
+# WhatsApp Cloud API (Meta app > WhatsApp > API setup).
+WHATSAPP_TOKEN = os.getenv('WHATSAPP_TOKEN', '')
+WHATSAPP_PHONE_NUMBER_ID = os.getenv('WHATSAPP_PHONE_NUMBER_ID', '')
+WHATSAPP_VERIFY_TOKEN = os.getenv('WHATSAPP_VERIFY_TOKEN', '')
+WHATSAPP_APP_SECRET = os.getenv('WHATSAPP_APP_SECRET', '')
+# The number customers message, e.g. +254712345678 (used for wa.me links).
+WHATSAPP_DISPLAY_NUMBER = os.getenv('WHATSAPP_DISPLAY_NUMBER', '')
+WHATSAPP_API_VERSION = os.getenv('WHATSAPP_API_VERSION', 'v23.0')
+WHATSAPP_TEMPLATE_LANGUAGE = os.getenv('WHATSAPP_TEMPLATE_LANGUAGE', 'en')
+
 VELORA_NOTIFICATION_PROVIDERS = {
     'email': os.getenv('NOTIFY_EMAIL_PROVIDER', 'resend' if RESEND_API_KEY else 'console'),
     'sms': os.getenv('NOTIFY_SMS_PROVIDER', 'console'),
-    'whatsapp': os.getenv('NOTIFY_WHATSAPP_PROVIDER', 'console'),
+    'whatsapp': os.getenv('NOTIFY_WHATSAPP_PROVIDER', 'whatsapp_cloud' if WHATSAPP_TOKEN else 'console'),
+    'telegram': os.getenv('NOTIFY_TELEGRAM_PROVIDER', 'telegram' if TELEGRAM_BOT_TOKEN else 'console'),
     'push': os.getenv('NOTIFY_PUSH_PROVIDER', 'console'),
 }
 VELORA_NOTIFICATION_MAX_ATTEMPTS = 3
@@ -267,5 +285,6 @@ LOGGING = {
     'handlers': {'console': {'class': 'logging.StreamHandler'}},
     'loggers': {
         'velora.notifications': {'handlers': ['console'], 'level': 'INFO'},
+        'velora.bots': {'handlers': ['console'], 'level': 'INFO'},
     },
 }
