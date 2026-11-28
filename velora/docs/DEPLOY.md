@@ -47,6 +47,10 @@ Compose reads `.env` first, then `.env.production` on top of it (copy it from `.
 
 - Put a value in single quotes if it contains `$`. Compose would otherwise read it as a variable.
 - Leave a line out (or commented) instead of empty. An empty value in `.env.production` wipes the one in `.env`.
+- Use the exact names the settings read (`RESEND_API_KEY`, `VELORA_EMAIL_FROM`, …). An unknown name is
+  silently ignored.
+- After editing either file, run `docker compose up -d --force-recreate api scheduler`. `restart` does not
+  re-read them.
 
 The site and the API are the same site (`getvelora.co.ke`), so the session cookie works with
 `SameSite=Lax`. A Vercel preview URL (`*.vercel.app`) is a different site: it can show public pages but
@@ -123,5 +127,7 @@ Add the domains `getvelora.co.ke` and `www.getvelora.co.ke` (redirect www to the
 - WhatsApp (Meta app > WhatsApp > Configuration): Callback URL
   `https://api.getvelora.co.ke/bots/whatsapp/webhook/`, Verify token = `WHATSAPP_VERIFY_TOKEN`,
   subscribe to `messages`.
-- Resend: email sends from `info@genmars.co.ke` only once `genmars.co.ke` is verified in Resend. Until
+- Resend: email is sent from `info@getvelora.co.ke`, set by `VELORA_EMAIL_FROM` and `RESEND_API_KEY` in
+  `.env.production`. Nothing sends until `getvelora.co.ke` is verified in Resend (Domains → add it, then put
+  its DNS records in Cloudflare as **DNS only**). Until
   then sends fail and the scheduler retries them (5, 15, 45 minutes), then marks them failed.

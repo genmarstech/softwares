@@ -107,7 +107,7 @@ are respected.
   template `notifications/templates/notifications/email.html`). Customer emails lead with the
   business's name; emails to the business show the Velora logo from
   `FRONTEND_URL/brand/email-logo.png` (override with `VELORA_EMAIL_LOGO_URL`).
-  Emails come from `VELORA_EMAIL_FROM` (`info@genmars.co.ke` in production; falls back to `RESEND_FROM_EMAIL`) as "Velora" to the business
+  Emails come from `VELORA_EMAIL_FROM` (`info@getvelora.co.ke` in production; falls back to `RESEND_FROM_EMAIL`) as "Velora" to the business
   and "<Business> via Velora" to customers (name set by `VELORA_EMAIL_FROM_NAME`); customer replies go to
   the business email. Every footer says "Velora is a product of Genmars Tech" (`VELORA_PARENT_COMPANY`,
   optional link `VELORA_PARENT_COMPANY_URL`). Without a key, emails are only logged.
