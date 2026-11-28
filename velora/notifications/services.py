@@ -71,6 +71,33 @@ def customer_channels(business, customer):
     return result
 
 
+def _provider_name(channel):
+    return getattr(settings, 'VELORA_NOTIFICATION_PROVIDERS', {}).get(channel, 'console')
+
+
+def customer_targets(business, customer):
+    """``[(channel, address)]`` for this customer: their channels plus any bot chats.
+
+    With a real WhatsApp provider, WhatsApp only goes to customers who have
+    messaged the Velora WhatsApp bot (that is their opt-in). Telegram goes to
+    customers who linked their number in the Telegram bot. Both need the bot
+    turned on for the business, and stop when the customer sends STOP.
+    """
+    from bots.booking import chat_addresses
+
+    chats = chat_addresses(business, customer)
+    if customer.opted_out('whatsapp'):
+        chats.pop('whatsapp', None)
+    real_whatsapp = _provider_name('whatsapp') != 'console'
+    targets = []
+    for channel in customer_channels(business, customer):
+        if channel == 'whatsapp' and (real_whatsapp or 'whatsapp' in chats):
+            continue
+        targets.append((channel, _address_for(customer, channel)))
+    targets += list(chats.items())
+    return targets
+
+
 def apply_quiet_hours(business, when):
     """Move ``when`` to the end of quiet hours if it falls inside them."""
     policy = _policy(business)
@@ -119,9 +146,15 @@ def queue(*, business, event, channel, to_address, body, subject='', booking=Non
 
 def notify_customer(booking, event, subject, message, *, scheduled_for=None, respect_quiet_hours=False,
                     with_actions=True):
+    from bots.engine import quiet_chat
+
     business, customer = booking.business, booking.customer
     created = []
-    for channel in customer_channels(business, customer):
+    # The chat the customer is using right now already got the bot's answer.
+    skip = quiet_chat.get() if scheduled_for is None else None
+    for channel, address in customer_targets(business, customer):
+        if skip and skip == (channel, str(address)):
+            continue
         body = f'Hi {customer.full_name.split(" ")[0]}, {message}'
         if with_actions:
             body += f'\nManage your booking: {manage_link(booking)}'
@@ -129,7 +162,7 @@ def notify_customer(booking, event, subject, message, *, scheduled_for=None, res
         body += f'\n— {business.business_name}'
         n = queue(
             business=business, booking=booking, event=event, channel=channel,
-            to_address=_address_for(customer, channel), subject=f'{subject} · {business.business_name}',
+            to_address=address, subject=f'{subject} · {business.business_name}',
             body=body, recipient_name=customer.full_name, scheduled_for=scheduled_for,
             respect_quiet_hours=respect_quiet_hours,
         )
@@ -154,6 +187,14 @@ def notify_team(booking, event, message):
             business=business, booking=booking, event=event, channel='email', to_address=email,
             subject=f'{Notification.Event(event).label}: {booking.customer.full_name}',
             body=message, recipient_type=recipient_type, recipient_name=name,
+        ))
+    # The owner's own Telegram and WhatsApp, linked on the dashboard's Channels page.
+    from bots.booking import owner_chat_targets
+    for channel, address, name in owner_chat_targets(business):
+        created.append(queue(
+            business=business, booking=booking, event=event, channel=channel, to_address=address,
+            subject=f'{Notification.Event(event).label}: {booking.customer.full_name}',
+            body=message, recipient_type='business', recipient_name=name,
         ))
     return created
 
@@ -363,10 +404,10 @@ def payment_receipt(payment):
 def waitlist_opening(entry, booking):
     customer = entry.customer
     business = entry.business
-    for channel in customer_channels(business, customer):
+    for channel, address in customer_targets(business, customer):
         queue(
             business=business, booking=None, event=Notification.Event.WAITLIST_OPENING, channel=channel,
-            to_address=_address_for(customer, channel),
+            to_address=address,
             subject=f'A slot opened up · {business.business_name}',
             body=(f'Hi {customer.full_name.split(" ")[0]}, a {entry.service.service_name} slot just opened on '
                   f'{entry.desired_date:%a %d %b}. Book it before it goes: {booking_page_link(business)}'),

@@ -209,6 +209,7 @@ class Booking(models.Model):
         PHONE = 'phone', 'Phone'
         STAFF = 'staff', 'Added by staff'
         WHATSAPP = 'whatsapp', 'WhatsApp'
+        TELEGRAM = 'telegram', 'Telegram'
         API = 'api', 'API'
 
     ACTIVE_STATUSES = (Status.PENDING, Status.HELD, Status.CONFIRMED, Status.RESCHEDULED)

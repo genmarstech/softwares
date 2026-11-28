@@ -11,6 +11,7 @@ class Notification(models.Model):
         EMAIL = 'email', 'Email'
         SMS = 'sms', 'SMS'
         WHATSAPP = 'whatsapp', 'WhatsApp'
+        TELEGRAM = 'telegram', 'Telegram'
         PUSH = 'push', 'Push'
 
     class Status(models.TextChoices):

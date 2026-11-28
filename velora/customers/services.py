@@ -83,9 +83,9 @@ def join_business(account, business, channel='link'):
 
     An existing guest record (from bookings made before they had an account) is
     linked when the phone number matches and its email matches or is empty, so
-    their earlier visits show up in their history. Phone numbers are not
-    verified yet, so a phone match alone is not enough to see someone's
-    bookings.
+    their earlier visits show up in their history. Numbers typed on the web are
+    not verified, so there a phone match alone is not enough to see someone's
+    bookings; a number verified through the WhatsApp or Telegram bot is.
     """
     customer = membership(account, business)
     if customer is None:
@@ -96,7 +96,8 @@ def join_business(account, business, channel='link'):
         ):
             if not same_phone(guest.phone_number, account.phone_number):
                 continue
-            if guest.email and guest.email.lower() != email:
+            # A verified phone (proved over WhatsApp or Telegram) is enough on its own.
+            if guest.email and guest.email.lower() != email and not account.phone_verified:
                 continue
             customer = guest
             break
