@@ -80,6 +80,8 @@ class BotTestCase(TransactionTestCase):
             whatsapp_number='+254700000000', business_email='glow@example.com',
         )
         booking_services.ensure_business_defaults(self.business)
+        # The owner has confirmed their opening hours, so the business takes online bookings.
+        booking_services.confirm_opening_hours(self.business)
         policy = booking_services.get_policy(self.business)
         policy.min_notice_minutes = 0
         policy.notification_channels = ['email']

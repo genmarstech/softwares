@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("bookings", "0003_customer_accounts"),
+        ("bookings", "0004_alter_booking_channel"),
     ]
 
     operations = [

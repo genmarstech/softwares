@@ -117,7 +117,9 @@ def joined_businesses(account):
 # ---------------------------------------------------------------------------
 
 def services_for(business):
-    return list(business.services.filter(is_available=True).order_by('service_name'))
+    # Same rule as the booking link: only services the business is set up to take online.
+    blocked = set(booking_services.booking_readiness(business)['unbookable_service_ids'])
+    return [s for s in business.services.filter(is_available=True).order_by('service_name') if s.id not in blocked]
 
 
 def service(business, service_id):
@@ -166,6 +168,9 @@ def open_slots(business, svc, day, staff=None, exclude_booking_id=None):
 # ---------------------------------------------------------------------------
 
 def book(account, business, svc, start, staff, channel, notes=''):
+    if booking_services.service_readiness(business, svc):
+        raise booking_services.BookingError(
+            f'{business.business_name} is not taking online bookings for this service yet.', code='not_ready')
     customer = customer_for(account, business, channel)
     return booking_services.create_booking(
         business=business, service=svc, customer=customer, start=start, staff=staff,
