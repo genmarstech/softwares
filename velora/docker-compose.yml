@@ -1,16 +1,23 @@
 # Velora backend, production on this computer.
 #
-#   bookingdb  Postgres 17. Its data volume is the one local development always used.
+#   proddb     Postgres 17 for production. No host port: only these containers
+#              reach it. Credentials are DB_NAME / DB_USER / DB_PASSWORD from
+#              .env.production.
+#   bookingdb  Postgres 17 for local development (`runserver`), on 127.0.0.1:5432.
+#              Production never touches it.
 #   migrate    runs once on every `up`, before the API starts.
 #   api        gunicorn.
 #   web        nginx in front: /static/, /media/ (logos), everything else to api.
 #              Published on 127.0.0.1:8002 only; the host's cloudflared forwards
 #              api.getvelora.co.ke there (see docs/DEPLOY.md).
 #   scheduler  reminders, retries, hold expiry every minute; summaries every Monday.
+#   backup     pg_dump of proddb plus a tar of the logos into ./backups every night,
+#              keeping 14 days. This computer is the only copy of production, so copy
+#              ./backups somewhere else too (docs/DEPLOY.md).
 #
-# Settings: .env (shared with local dev, holds the database values and secrets) and
-# then .env.production, which overrides it for the containers. Only the database
-# values are read by Compose itself, for Postgres.
+# Settings: .env (shared with local dev, holds the secrets) and then .env.production,
+# which overrides it for the containers. The dev database's values in .env are read
+# by Compose itself, for bookingdb.
 #
 # For local development, `docker compose up -d bookingdb` still starts only Postgres.
 
@@ -24,17 +31,38 @@ x-app: &app
     - path: .env.production
       required: false
   environment:
-    # Inside Compose the database is the bookingdb service, whatever .env says for dev.
-    DB_HOST: bookingdb
+    # Inside Compose the database is proddb, whatever .env says for dev.
+    DB_HOST: proddb
     DB_PORT: "5432"
     BEHIND_PROXY: "1"
   volumes:
-    - ./media:/app/media
+    - prod_media:/app/media
   depends_on:
-    bookingdb:
+    proddb:
       condition: service_healthy
 
+# The postgres image wants POSTGRES_*; the app's DB_* in .env.production are the one
+# source, so they are mapped inside the container ($$ stops Compose reading them).
+x-proddb-env: &proddb-env
+  env_file:
+    - path: .env.production
+      required: true
+
 services:
+  proddb:
+    image: postgres:17-alpine
+    container_name: velora_prod_db
+    restart: unless-stopped
+    <<: *proddb-env
+    entrypoint: ["sh", "-c", "POSTGRES_USER=$$DB_USER POSTGRES_PASSWORD=$$DB_PASSWORD POSTGRES_DB=$$DB_NAME exec docker-entrypoint.sh postgres"]
+    volumes:
+      - proddb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$DB_USER -d $$DB_NAME"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   bookingdb:
     image: postgres:17-alpine
     container_name: velora_db
@@ -60,7 +88,7 @@ services:
     restart: "no"
     command: sh -c "python manage.py migrate --noinput && python manage.py collectstatic --noinput"
     volumes:
-      - ./media:/app/media
+      - prod_media:/app/media
       - static:/app/staticfiles
 
   api:
@@ -90,11 +118,49 @@ services:
     volumes:
       - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - static:/srv/static:ro
-      - ./media:/srv/media:ro
+      - prod_media:/srv/media:ro
     depends_on:
       api:
         condition: service_healthy
 
+  backup:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    <<: *proddb-env
+    # Runs as you, so the files in ./backups are yours to copy and delete.
+    user: "1000:1000"
+    environment:
+      PGHOST: proddb
+      TZ: Africa/Nairobi
+    volumes:
+      - ./backups:/backups
+      - prod_media:/media:ro
+    depends_on:
+      proddb:
+        condition: service_healthy
+    # One right away, then one a day. Each dump is a full, restorable copy
+    # (pg_restore, see docs/DEPLOY.md); a failed dump is reported and retried next day.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        while true; do
+          stamp=$$(date +%Y-%m-%d_%H%M)
+          if PGPASSWORD="$$DB_PASSWORD" pg_dump -U "$$DB_USER" -d "$$DB_NAME" -Fc -f "/backups/velora_$$stamp.dump.part"; then
+            mv "/backups/velora_$$stamp.dump.part" "/backups/velora_$$stamp.dump"
+            tar -czf "/backups/media_$$stamp.tar.gz" -C /media .
+            echo "Backup $$stamp written."
+          else
+            rm -f "/backups/velora_$$stamp.dump.part"
+            echo "Backup $$stamp FAILED." >&2
+          fi
+          find /backups -name 'velora_*.dump' -mtime +14 -delete
+          find /backups -name 'media_*.tar.gz' -mtime +14 -delete
+          sleep 86400
+        done
+
 volumes:
+  proddb_data:
+  prod_media:
   bookingdb_data:
   static:

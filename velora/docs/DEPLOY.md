@@ -14,20 +14,27 @@ browser ─https─> Cloudflare ─tunnel─> cloudflared (host, systemd) ─> 1
 
 ## Containers
 
-`docker-compose.yml` runs five services:
+`docker-compose.yml` runs these services:
 
-- **bookingdb**: Postgres 17, on the `velora_bookingdb_data` volume (the same one local development used),
-  published on `127.0.0.1:5432` only.
+- **proddb**: the production Postgres 17, on the `velora_proddb_data` volume, with no host port. It uses
+  `DB_NAME` / `DB_USER` / `DB_PASSWORD` from `.env.production`. It started on 2026-11-28 as a copy of the
+  development database.
+- **bookingdb**: the development Postgres for `runserver`, on `velora_bookingdb_data`, published on
+  `127.0.0.1:5432` only. Production never reads or writes it.
 - **migrate**: runs `migrate` and `collectstatic` on every `up`, then exits. `api` and `scheduler`
   wait for it.
 - **api**: gunicorn, 3 workers.
-- **web**: nginx. Serves `/static/` and `/media/` (business logos, bind-mounted from `./media`) and
+- **web**: nginx. Serves `/static/` and `/media/` (business logos, on the `velora_prod_media` volume;
+  `./media` stays the development copy) and
   proxies everything else. It sets `X-Forwarded-Proto` and `X-Forwarded-For` (from
   `CF-Connecting-IP`) itself, so Django (`BEHIND_PROXY=1`) can trust them.
 - **scheduler**: `python manage.py run_scheduler`. Runs `process_notifications` every minute and
   `send_summary_reports --days 7` once a week (Monday from 07:00 Nairobi). Whether this week's summary
   went out is read from the notifications table, so a restart does not skip or repeat it. This replaces
   the cron entries in the README.
+
+- **backup**: one backup right away, then one every 24 hours, into `./backups`: `velora_<date>.dump`
+  (`pg_dump -Fc` of proddb) and `media_<date>.tar.gz` (the logos). It keeps 14 days.
 
 Everything has `restart: unless-stopped`, so the stack comes back after a reboot once Docker starts
 (`sudo systemctl enable docker`).
@@ -55,13 +62,31 @@ cp .env.production.example .env.production   # fill it in
 docker compose up -d --build
 docker compose ps                             # api healthy, migrate exited 0
 curl -I -H 'Host: api.getvelora.co.ke' http://127.0.0.1:8002/admin/login/
-docker compose exec api python manage.py createsuperuser   # first time only
+docker compose exec api python manage.py createsuperuser   # only on an empty proddb
 ```
 
 Update after a merge: `git pull && docker compose up -d --build`.
 Logs: `docker compose logs -f api scheduler`.
 
 If port 8002 is taken by a dev `runserver`, stop that first.
+
+## Backups
+
+This computer is the only place production lives, so a dead disk or a stolen laptop loses everything
+that is only in `./backups`. Copy the folder somewhere else regularly, for example to an external drive
+or to cloud storage. The newest dump plus the newest media tarball is a complete copy.
+
+Restore into an empty proddb:
+
+```bash
+docker compose stop api scheduler web
+docker exec -i velora_prod_db sh -c 'dropdb -U "$DB_USER" "$DB_NAME" && createdb -U "$DB_USER" "$DB_NAME"'
+docker exec -i velora_prod_db sh -c 'pg_restore -U "$DB_USER" -d "$DB_NAME" --no-owner --exit-on-error' < backups/velora_<date>.dump
+docker compose run --rm --no-deps -v "$PWD/backups:/b:ro" --entrypoint sh migrate -c 'tar -xzf /b/media_<date>.tar.gz -C /app/media'
+docker compose up -d
+```
+
+Try a restore once before you need one.
 
 ## Cloudflare
 
